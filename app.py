@@ -16,9 +16,6 @@ TEMPLATE_FILE = "Template.xlsx"
 SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
-# ==========================================
-# 2. GOOGLE DRIVE CONNECTION
-# ==========================================
 def get_drive_service():
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
@@ -36,9 +33,6 @@ def get_latest_roster(service):
     request = service.files().get_media(fileId=items[0]['id'])
     return io.BytesIO(request.execute()), items[0]['name']
 
-# ==========================================
-# 3. ENGINE
-# ==========================================
 def get_state(row):
     last_val, prev_val = None, None
     for d in range(31, 1, -1):
@@ -71,17 +65,14 @@ target_year = st.sidebar.number_input("Year", min_value=2024, max_value=2050, va
 target_month_num = MONTH_NAMES.index(target_month_name) + 1
 days_in_month = pd.Period(f'{target_year}-{target_month_num:02d}-01').days_in_month
 
-if 'leaves' not in st.session_state: st.session_state.leaves = {}
-df_prev = pd.read_excel(latest_file[0], skiprows=2)
-df_prev.columns = ['S No', 'NAME'] + [str(i) for i in range(1, len(df_prev.columns)-1)]
-names = df_prev['NAME'].dropna().unique().tolist()
-
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Writing Excel..."):
+    with st.spinner("Processing..."):
+        df_prev = pd.read_excel(latest_file[0], skiprows=2)
+        df_prev.columns = ['S No', 'NAME'] + [str(i) for i in range(1, len(df_prev.columns)-1)]
         employees = df_prev.dropna(subset=['NAME'])['NAME'].tolist()
-        emp_state = {row['NAME']: get_state(row) for _, row in df_prev.dropna(subset=['NAME']).iterrows()}
+        emp_state = {name: get_state(row) for name, row in zip(employees, df_prev.dropna(subset=['NAME']).to_dict('records'))}
+        
         roster = {emp: {d: None for d in range(1, days_in_month + 1)} for emp in employees}
-
         for d in range(1, days_in_month + 1):
             for emp in employees:
                 shift = SEQ[emp_state[emp]]
@@ -91,39 +82,51 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
         
-        # --- FIX: HARD ERASE GHOST DATA ---
-        # Instead of looping, we clear a specific range to avoid AttributeError
-        for row in ws.iter_rows(min_row=2, max_row=50, min_col=3, max_col=50):
-            for cell in row:
+        # 1. REMOVE ALL MERGES & OLD DATA TO PREVENT AttributeErrors
+        # We create a list first because unmerging during a loop breaks things
+        merges = list(ws.merged_cells.ranges)
+        for m in merges:
+            ws.unmerge_cells(str(m))
+            
+        for r in ws.iter_rows(min_row=1, max_row=100, min_col=3, max_col=60):
+            for cell in r:
                 cell.value = None
                 cell.fill = PatternFill(fill_type=None)
 
-        # Title
-        ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}"
-        
-        # Colors
+        # 2. POSITIONING & COLORS
         yellow = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
+        center = Alignment(horizontal='center', vertical='center')
 
-        # Set Day Headers
+        # Title
+        ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}"
+        ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=days_in_month+2)
+        ws['B1'].alignment = center
+
+        # Attendance Header
+        ws.cell(row=2, column=3, value="ATTENDANCE")
+        ws.merge_cells(start_row=2, start_column=3, end_row=2, end_column=days_in_month+2)
+        ws.cell(row=2, column=3).alignment = center
+
+        # 3. WRITE DAYS
         for d in range(1, days_in_month + 1):
             col = d + 2
             ws.cell(row=3, column=col, value=d)
             ws.column_dimensions[get_column_letter(col)].width = 5
 
-        # --- FIX: EXACT TOTAL SHIFT POSITIONING ---
+        # 4. TOTAL SHIFTS SECTION
         start_totals = days_in_month + 3
-        headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
-        
+        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS")
         ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=start_totals+7)
-        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").alignment = Alignment(horizontal='center')
-
+        ws.cell(row=2, column=start_totals).alignment = center
+        
+        headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
         for i, h in enumerate(headers):
             col = start_totals + i
             ws.cell(row=3, column=col, value=h)
             ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
 
-        # Write Rows
+        # 5. WRITE EMPLOYEE DATA
         for idx, emp in enumerate(employees):
             r = idx + 4
             ws.cell(row=r, column=1, value=idx+1)
@@ -132,7 +135,7 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             for d in range(1, days_in_month + 1):
                 ws.cell(row=r, column=d+2, value=roster[emp][d])
             
-            # Column Letters for Formulas
+            # Formulas
             last_d_ltr = get_column_letter(days_in_month + 2)
             tot_ltr = get_column_letter(start_totals)
             a_ltr = get_column_letter(start_totals + 1)
@@ -154,10 +157,9 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
 
             # Final Paint
             ws[f'{tot_ltr}{r}'].fill = yellow
-            for col_ltr in [a_ltr, b_ltr, c_ltr, wo_ltr, x_ltr, l_ltr, g_ltr]:
-                ws[f'{col_ltr}{r}'].fill = peach
+            for ltr in [a_ltr, b_ltr, c_ltr, wo_ltr, x_ltr, l_ltr, g_ltr]:
+                ws[f'{ltr}{r}'].fill = peach
 
-        # Save
         out = io.BytesIO()
         wb.save(out)
         st.balloons()
