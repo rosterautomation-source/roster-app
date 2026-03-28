@@ -70,34 +70,57 @@ st.sidebar.markdown("---")
 st.sidebar.header("2. Leaves")
 if 'leaves' not in st.session_state: st.session_state.leaves = {}
 
+# --- LOAD PREVIOUS DATA ---
 df_prev = pd.read_excel(latest_file[0], skiprows=2)
-df_prev.columns = ['S No', 'NAME'] + [str(i) for i in range(1, len(df_prev.columns)-1)]
-names_list = [n for n in df_prev['NAME'].dropna().unique().tolist() if str(n).strip() not in ["A", "B", "C"]]
+# We dynamically find the 'TOTAL' column from the previous file
+total_col_idx = None
+for i, col in enumerate(df_prev.columns):
+    if "TOTAL" in str(col).upper():
+        total_col_idx = i
+        break
+
+df_prev.columns = [str(c) for c in df_prev.columns]
+# Standardize column naming for logic
+col_names = ['S No', 'NAME'] + [str(i) for i in range(1, 32)] # Placeholder for days
+# Map names to their previous totals for carry-over fairness
+prev_totals = {}
+for _, row in df_prev.iterrows():
+    name = str(row.iloc[1]).strip()
+    if name and name not in ["nan", "A", "B", "C"]:
+        # If TOTAL column wasn't found, default to 24 (the neutral average)
+        val = row.iloc[total_col_idx] if total_col_idx is not None else 24
+        prev_totals[name] = val if pd.notna(val) else 24
+
+names_list = list(prev_totals.keys())
 
 sel_name = st.sidebar.selectbox("Select Employee", names_list)
 sel_days = st.sidebar.text_input("Enter Days (e.g., 5, 12)")
 
 if st.sidebar.button("Register Leave"):
     st.session_state.leaves[sel_name] = [int(d.strip()) for d in sel_days.split(',') if d.strip().isdigit()]
-    st.sidebar.success("Added!")
+    st.sidebar.success(f"Leave registered for {sel_name}")
 
 # ==========================================
-# 3. STRICT BALANCING ENGINE
+# 3. FAIRNESS ENGINE (CARRY-OVER)
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Applying Strict C-Shift Limits..."):
+    with st.spinner("Analyzing last month's data for fairness..."):
         employees = names_list
-        emp_state = {name: get_state(row) for name, row in zip(employees, df_prev[df_prev['NAME'].isin(employees)].to_dict('records'))}
+        emp_state = {name: get_state(row) for name, row in zip(employees, df_prev[df_prev.iloc[:,1].isin(employees)].to_dict('records'))}
         
-        duty_total = {emp: 0 for emp in employees}
+        # Fairness Logic: Start with the totals from last month!
+        # This is where lkONDAIAH (23) gets priority over someone with 25.
+        duty_history = {emp: prev_totals.get(emp, 24) for emp in employees}
+        
+        # Separate tracker for JUST this month's duties for the Excel 'TOTAL' column
+        this_month_duties = {emp: 0 for emp in employees}
         c_counts = {emp: 0 for emp in employees}
         roster = {emp: {d: None for d in range(1, days_in_month + 1)} for emp in employees}
 
-        # Calculate Monthly C-Limits
+        # Monthly C-Limits
         c_limits = {}
         for emp in employees:
             present_days = days_in_month - len(st.session_state.leaves.get(emp, []))
-            # Rule: Max 8 C's for 24 duties. Limit = 8, but lower if they have lots of leave.
             c_limits[emp] = min(8, math.ceil(present_days / 3))
 
         for d in range(1, days_in_month + 1):
@@ -110,41 +133,34 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
                 else:
                     available.append(emp)
 
-            # Fairness sort: Lowest duties first
-            available.sort(key=lambda x: duty_total[x])
+            # --- THE KEY: SORT BY CUMULATIVE HISTORY ---
+            # People with lower duty_history (last month + this month) go first.
+            available.sort(key=lambda x: duty_history[x])
 
-            # 1. ASSIGN C-SHIFTS (Strict Budgeting)
             c_assigned = 0
-            # Pass A: Preferred C AND Under Limit
+            # Pass 1: C-Shifts
             for emp in available[:]:
-                if c_assigned < 8 and SEQ[emp_state[emp]] == 'C' and c_counts[emp] < c_limits[emp]:
-                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1
+                if c_assigned < 8 and SEQ[emp_state[emp]] == 'C' and (c_counts[emp] < c_limits[emp] or this_month_duties[emp] >= 24):
+                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_history[emp] += 1; this_month_duties[emp] += 1; c_assigned += 1
                     emp_state[emp] = (emp_state[emp] + 1) % 7; available.remove(emp)
 
-            # Pass B: Not preferred, but Under Limit
             for emp in available[:]:
-                if c_assigned < 8 and c_counts[emp] < c_limits[emp]:
-                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1
+                if c_assigned < 8 and (c_counts[emp] < c_limits[emp] or this_month_duties[emp] >= 24):
+                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_history[emp] += 1; this_month_duties[emp] += 1; c_assigned += 1
                     emp_state[emp] = (SEQ.index('C') + 1) % 7; available.remove(emp)
             
-            # Pass C: Safety Valve (Only if target 8 not met, give to people with > 24 duties)
-            for emp in available[:]:
-                if c_assigned < 8 and duty_total[emp] >= 24:
-                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1; available.remove(emp)
-
-            # 2. ASSIGN B AND A
+            # Pass 2: B and A Shifts
             for s in ['B', 'A']:
                 s_assigned = 0
                 for emp in available[:]:
                     if s_assigned < 8 and SEQ[emp_state[emp]] == s:
-                        roster[emp][d] = s; duty_total[emp] += 1; s_assigned += 1
+                        roster[emp][d] = s; duty_history[emp] += 1; this_month_duties[emp] += 1; s_assigned += 1
                         emp_state[emp] = (emp_state[emp] + 1) % 7; available.remove(emp)
                 while s_assigned < 8 and available:
                     emp = available.pop(0)
-                    roster[emp][d] = s; duty_total[emp] += 1; s_assigned += 1
+                    roster[emp][d] = s; duty_history[emp] += 1; this_month_duties[emp] += 1; s_assigned += 1
                     emp_state[emp] = (SEQ.index(s) + 1) % 7
 
-            # 3. W/O
             for emp in available:
                 roster[emp][d] = 'W/O'; emp_state[emp] = 0
 
@@ -188,8 +204,6 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             ws.cell(row=3, column=col, value=h).alignment = center
             ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
 
-        # Data Rows
-        num_emp = len(employees)
         for idx, emp in enumerate(employees):
             r = idx + 4
             ws.cell(row=r, column=1, value=idx+1)
@@ -223,4 +237,4 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         out = io.BytesIO()
         wb.save(out)
         st.balloons()
-        st.download_button("Download Final Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
+        st.download_button("Download Fair Balanced Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
