@@ -102,10 +102,10 @@ if st.sidebar.button("Register Leave"):
     st.sidebar.success(f"Added for {sel_name}")
 
 # ==========================================
-# 4. ENGINE
+# 4. ENGINE (Your Refined Logic)
 # ==========================================
 if st.button("Generate Fair & Balanced Roster", type="primary"):
-    with st.spinner("Executing Production Scheduling Engine..."):
+    with st.spinner("Executing Production Scheduling Engine & Formatting..."):
 
         TARGET_TOTAL = (days_in_month * 24) // len(employees)
         MIN_WO = 4
@@ -137,6 +137,7 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                 else:
                     available.append(emp)
 
+            # Prioritize workers with the lowest current duties
             available.sort(key=lambda x: this_month_duties[x])
 
             workers_today = available[:24]
@@ -203,9 +204,13 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
 
                     emp_state[chosen] = (emp_state[chosen] + 1) % 7
 
+        # ==========================================
+        # 5. EXCEL FORMATTING (PRO BLOCKS & BORDERS)
+        # ==========================================
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
 
+        # Clean slate: unmerge and clear existing data
         for m in list(ws.merged_cells.ranges):
             ws.unmerge_cells(str(m))
 
@@ -213,17 +218,122 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
             for cell in r:
                 if cell.column > 2:
                     cell.value = None
+                cell.fill = PatternFill(fill_type=None)
+                cell.border = Border()
 
+        # Define Styles
+        thin = Side(border_style="thin")
+        thick_blue = Side(border_style="thick", color="0000FF")
+        all_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
+        center = Alignment(horizontal='center', vertical='center')
+
+        # Dimensions & Bounds
+        ws.column_dimensions['A'].width = 6.43
+        ws.column_dimensions['B'].width = 25
+        start_totals = days_in_month + 3
+        end_totals = start_totals + 7
+
+        # Main Title Merge & Format
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
+        t_cell = ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}")
+        t_cell.font = Font(bold=True, size=20)
+        t_cell.alignment = center
+
+        # Header Merges
+        ws.merge_cells('A2:A3')
+        ws['A2'] = "S No"
+        ws['A2'].font = Font(bold=True, size=16)
+        ws['A2'].alignment = center
+
+        ws.merge_cells('B2:B3')
+        ws['B2'] = "NAME"
+        ws['B2'].font = Font(bold=True, size=16)
+        ws['B2'].alignment = center
+
+        ws.merge_cells(start_row=2, start_column=3, end_row=2, end_column=days_in_month+2)
+        ws.cell(row=2, column=3, value="ATTENDANCE").font = Font(bold=True, size=16)
+        ws.cell(row=2, column=3).alignment = center
+
+        ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=end_totals)
+        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").font = Font(bold=True, size=16)
+        ws.cell(row=2, column=start_totals).alignment = center
+
+        # Day Columns and Totals Columns Setup
+        for d in range(1, days_in_month + 1):
+            ws.cell(row=3, column=d+2, value=d).alignment = center
+            ws.column_dimensions[get_column_letter(d+2)].width = 5
+
+        h_labels = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
+        for i, h in enumerate(h_labels):
+            col = start_totals + i
+            ws.cell(row=3, column=col, value=h).alignment = center
+            ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
+
+        # Write Roster Data & Calculated Fields
+        num_emp = len(employees)
         for idx, emp in enumerate(employees):
             r = idx + 4
-            ws.cell(row=r, column=1, value=idx+1)
+            ws.cell(row=r, column=1, value=idx+1).alignment = center
             ws.cell(row=r, column=2, value=emp)
 
             for d in range(1, days_in_month + 1):
-                ws.cell(row=r, column=d+2, value=roster[emp][d])
+                ws.cell(row=r, column=d+2, value=roster[emp][d]).alignment = center
 
+            t_ltr = get_column_letter(start_totals)
+            last_d_ltr = get_column_letter(days_in_month + 2)
+            
+            # Formulas
+            ws[f'{t_ltr}{r}'] = f'=SUM({get_column_letter(start_totals+1)}{r}:{get_column_letter(start_totals+3)}{r})'
+            for i_h, h_code in enumerate(['A*', 'B*', 'C*', 'W/O*', 'X*', 'L*', 'G*']):
+                ws.cell(row=r, column=start_totals+1+i_h, value=f'=COUNTIF(C{r}:{last_d_ltr}{r},"{h_code}")')
+
+            # Row Paints
+            ws[f'{t_ltr}{r}'].fill = yellow_fill
+            ws[f'{t_ltr}{r}'].font = Font(bold=True)
+            for cp in range(start_totals+1, end_totals+1):
+                ws.cell(row=r, column=cp).fill = peach_fill
+
+            # Apply Borders to each cell in the row
+            for c in range(1, end_totals + 1):
+                ws.cell(row=r, column=c).border = Border(
+                    left=thick_blue if c==1 else thin,
+                    right=thick_blue if c==end_totals else thin,
+                    top=thin,
+                    bottom=thin if idx < num_emp - 1 else thick_blue
+                )
+
+        # Apply Header Borders (Rows 1-3)
+        for rh in range(1, 4):
+            for ch in range(1, end_totals + 1):
+                ws.cell(row=rh, column=ch).border = Border(
+                    left=thick_blue if ch==1 else thin,
+                    right=thick_blue if ch==end_totals else thin,
+                    top=thick_blue if rh==1 else thin,
+                    bottom=thin
+                )
+
+        # Bottom Summary Box (8-8-8 Output)
+        s_row = num_emp + 6
+        for i, stype in enumerate(["A", "B", "C"]):
+            curr_r = s_row + i
+            ws.cell(row=curr_r, column=2, value=stype).font = Font(bold=True)
+            ws.cell(row=curr_r, column=2).fill = yellow_fill
+            ws.cell(row=curr_r, column=2).alignment = center
+            ws.cell(row=curr_r, column=2).border = all_border
+            
+            for d in range(1, days_in_month + 1):
+                col_i = d + 2
+                cltr = get_column_letter(col_i)
+                ws.cell(row=curr_r, column=col_i, value=f'=COUNTIF({cltr}4:{cltr}{num_emp+3},"{stype}*")').fill = yellow_fill
+                ws.cell(row=curr_r, column=col_i).alignment = center
+                ws.cell(row=curr_r, column=col_i).border = all_border
+
+        # Save and Download
         out = io.BytesIO()
         wb.save(out)
 
-        st.success("Roster Generated Successfully")
-        st.download_button("Download Roster", out.getvalue(), "roster.xlsx")
+        st.balloons()
+        st.success("Production Roster Generated Successfully with Full Formatting!")
+        st.download_button("Download Final Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
