@@ -28,8 +28,8 @@ MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
 try:
 df_raw = pd.read_excel(SAVE_PATH, skiprows=2)
 st.success("Loaded latest roster automatically ✅")
-except:
-st.error("latest_roster.xlsx not found in repo")
+except Exception as e:
+st.error("latest_roster.xlsx not found in repo or failed to load")
 st.stop()
 
 # ==========================================
@@ -82,9 +82,12 @@ last_val = val
 elif prev_val is None:
 prev_val = val
 break
-if last_val == 'C': return 2 if prev_val == 'C' else 1
-if last_val == 'B': return 4 if prev_val == 'B' else 3
-if last_val == 'A': return 6 if prev_val == 'A' else 5
+if last_val == 'C':
+return 2 if prev_val == 'C' else 1
+if last_val == 'B':
+return 4 if prev_val == 'B' else 3
+if last_val == 'A':
+return 6 if prev_val == 'A' else 5
 return 0
 
 # ==========================================
