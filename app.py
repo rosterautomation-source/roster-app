@@ -4,10 +4,6 @@ import io
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Alignment
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
-from googleapiclient.errors import HttpError
 
 # ==========================================
 # 1. CONFIGURATION
@@ -24,6 +20,8 @@ MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "
 # 2. GOOGLE DRIVE CONNECTION
 # ==========================================
 def get_drive_service():
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
     creds = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=["https://www.googleapis.com/auth/drive"]
@@ -39,7 +37,7 @@ def get_latest_roster(service):
     return io.BytesIO(request.execute()), items[0]['name']
 
 # ==========================================
-# 3. ROSTER ENGINE
+# 3. ENGINE
 # ==========================================
 def get_state(row):
     last_val, prev_val = None, None
@@ -56,7 +54,7 @@ def get_state(row):
     return 0
 
 # ==========================================
-# 4. WEB INTERFACE
+# 4. WEB UI
 # ==========================================
 st.title("📅 Monthly Roster Generator")
 
@@ -64,7 +62,7 @@ service = get_drive_service()
 latest_file = get_latest_roster(service)
 
 if not latest_file:
-    st.error("Upload a file to Google Drive first.")
+    st.error("Upload a file to Drive folder first.")
     st.stop()
 
 st.sidebar.header("Settings")
@@ -78,71 +76,63 @@ df_prev = pd.read_excel(latest_file[0], skiprows=2)
 df_prev.columns = ['S No', 'NAME'] + [str(i) for i in range(1, len(df_prev.columns)-1)]
 names = df_prev['NAME'].dropna().unique().tolist()
 
-sel_name = st.sidebar.selectbox("Employee", names)
-sel_days = st.sidebar.text_input("Leave Days (e.g. 5, 6)")
-if st.sidebar.button("Add Leave"):
-    st.session_state.leaves[sel_name] = [int(d.strip()) for d in sel_days.split(',') if d.strip().isdigit()]
-
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Processing..."):
+    with st.spinner("Writing Excel..."):
         employees = df_prev.dropna(subset=['NAME'])['NAME'].tolist()
         emp_state = {row['NAME']: get_state(row) for _, row in df_prev.dropna(subset=['NAME']).iterrows()}
         roster = {emp: {d: None for d in range(1, days_in_month + 1)} for emp in employees}
 
-        # Fill shifts logic
         for d in range(1, days_in_month + 1):
             for emp in employees:
-                if emp in st.session_state.leaves and d in st.session_state.leaves[emp]:
-                    roster[emp][d] = 'L'
-                else:
-                    shift = SEQ[emp_state[emp]]
-                    roster[emp][d] = shift
-                    emp_state[emp] = (emp_state[emp] + 1) % 7 if shift != 'W/O' else 0
+                shift = SEQ[emp_state[emp]]
+                roster[emp][d] = shift
+                emp_state[emp] = (emp_state[emp] + 1) % 7
 
-        # ==========================================
-        # 5. FINAL EXCEL GENERATION
-        # ==========================================
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
         
-        # 1. Header Cleanup (Clean up to column AZ to prevent double Gs)
-        for r in range(1, 50):
-            for c in range(3, 53):
-                ws.cell(row=r, column=c).value = None
-                ws.cell(row=r, column=c).fill = PatternFill(fill_type=None)
+        # --- FIX: HARD ERASE GHOST DATA ---
+        # Instead of looping, we clear a specific range to avoid AttributeError
+        for row in ws.iter_rows(min_row=2, max_row=50, min_col=3, max_col=50):
+            for cell in row:
+                cell.value = None
+                cell.fill = PatternFill(fill_type=None)
 
-        # 2. Title & Column Setup
-        month_abbr = target_month_name[:3].upper()
-        ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
+        # Title
+        ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}"
         
+        # Colors
         yellow = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
-        
-        # 3. Write Days 1-X
+
+        # Set Day Headers
         for d in range(1, days_in_month + 1):
             col = d + 2
             ws.cell(row=3, column=col, value=d)
             ws.column_dimensions[get_column_letter(col)].width = 5
 
-        # 4. Write Fixed Total Shift Headers
+        # --- FIX: EXACT TOTAL SHIFT POSITIONING ---
         start_totals = days_in_month + 3
         headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
+        
+        ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=start_totals+7)
+        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").alignment = Alignment(horizontal='center')
+
         for i, h in enumerate(headers):
             col = start_totals + i
             ws.cell(row=3, column=col, value=h)
             ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
 
-        # 5. Write Data & Formulas
+        # Write Rows
         for idx, emp in enumerate(employees):
             r = idx + 4
             ws.cell(row=r, column=1, value=idx+1)
             ws.cell(row=r, column=2, value=emp)
             
-            # Days
             for d in range(1, days_in_month + 1):
                 ws.cell(row=r, column=d+2, value=roster[emp][d])
             
-            # Formulate Column Letters
+            # Column Letters for Formulas
             last_d_ltr = get_column_letter(days_in_month + 2)
             tot_ltr = get_column_letter(start_totals)
             a_ltr = get_column_letter(start_totals + 1)
@@ -153,7 +143,6 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             l_ltr = get_column_letter(start_totals + 6)
             g_ltr = get_column_letter(start_totals + 7)
 
-            # Formulas
             ws[f'{tot_ltr}{r}'] = f'=SUM({a_ltr}{r}:{c_ltr}{r})'
             ws[f'{a_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"A*")'
             ws[f'{b_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"B*")'
@@ -163,16 +152,13 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             ws[f'{l_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"L*")'
             ws[f'{g_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"G*")'
 
-            # Paint
+            # Final Paint
             ws[f'{tot_ltr}{r}'].fill = yellow
-            for ltr in [a_ltr, b_ltr, c_ltr, wo_ltr, x_ltr, l_ltr, g_ltr]:
-                ws[f'{ltr}{r}'].fill = peach
+            for col_ltr in [a_ltr, b_ltr, c_ltr, wo_ltr, x_ltr, l_ltr, g_ltr]:
+                ws[f'{col_ltr}{r}'].fill = peach
 
-        # 6. Final Logic: Dynamic Total Shift Label
-        ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=start_totals+7)
-        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").alignment = Alignment(horizontal='center')
-
+        # Save
         out = io.BytesIO()
         wb.save(out)
         st.balloons()
-        st.download_button("Download Now", out.getvalue(), f"ROSTER_{month_abbr}.xlsx")
+        st.download_button("Download Final Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
