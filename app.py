@@ -2,10 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import random
-import os
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, Alignment, Border, Side, Font
 
 # ==========================================
 
@@ -13,7 +10,7 @@ from openpyxl.styles import PatternFill, Alignment, Border, Side, Font
 
 # ==========================================
 
-st.set_page_config(page_title="Pro Roster Automation", layout="wide")
+st.set_page_config(page_title="Roster Automation", layout="wide")
 
 TEMPLATE_FILE = "Template.xlsx"
 SAVE_PATH = "latest_roster.xlsx"
@@ -24,28 +21,15 @@ MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
 
 # ==========================================
 
-# UI
+# LOAD FILE (AUTO)
 
 # ==========================================
 
-st.title("📅 Professional Roster Generator")
-
-# Upload only first time
-
-uploaded_file = st.file_uploader("Upload Previous Month Roster (First Time Only)", type=["xlsx"])
-
-if uploaded_file is not None:
-with open(SAVE_PATH, "wb") as f:
-f.write(uploaded_file.getbuffer())
-st.success("File saved successfully ✅")
-
-# Load latest roster
-
-if os.path.exists(SAVE_PATH):
+try:
 df_raw = pd.read_excel(SAVE_PATH, skiprows=2)
-st.success("Using latest saved roster ✅")
-else:
-st.warning("Upload previous month roster first time")
+st.success("Loaded latest roster automatically ✅")
+except:
+st.error("latest_roster.xlsx not found in repo")
 st.stop()
 
 # ==========================================
@@ -54,7 +38,9 @@ st.stop()
 
 # ==========================================
 
-st.sidebar.header("1. Settings")
+st.title("📅 Roster Generator")
+
+st.sidebar.header("Settings")
 target_month_name = st.sidebar.selectbox("Month", MONTH_NAMES, index=3)
 target_year = st.sidebar.number_input("Year", min_value=2024, max_value=2050, value=2026)
 
@@ -71,15 +57,12 @@ total_col_idx = next((i for i, c in enumerate(df_raw.columns) if "TOTAL" in str(
 
 employees = []
 emp_data_map = {}
-prev_totals = {}
 
 for _, row in df_raw.iterrows():
 name = str(row.iloc[1]).strip()
 if name and name.lower() not in ["nan", "a", "b", "c", "total", "none"]:
 employees.append(name)
 emp_data_map[name] = row
-val = row.iloc[total_col_idx] if total_col_idx is not None else 24
-prev_totals[name] = float(val) if pd.notna(val) else 24.0
 
 # ==========================================
 
@@ -106,58 +89,26 @@ return 0
 
 # ==========================================
 
-# LEAVES
+# GENERATE BUTTON
 
 # ==========================================
 
-st.sidebar.header("2. Leaves")
-if 'leaves' not in st.session_state:
-st.session_state.leaves = {}
-
-sel_name = st.sidebar.selectbox("Select Employee", employees)
-sel_days = st.sidebar.text_input("Enter Days (e.g., 5, 12)")
-
-if st.sidebar.button("Register Leave"):
-st.session_state.leaves[sel_name] = [int(d.strip()) for d in sel_days.split(',') if d.strip().isdigit()]
-st.sidebar.success(f"Added for {sel_name}")
-
-# ==========================================
-
-# GENERATION ENGINE
-
-# ==========================================
-
-if st.button("Generate Roster", type="primary"):
+if st.button("Generate Roster"):
 
 ```
-TARGET_TOTAL = 24
-
 emp_state = {n: get_state(emp_data_map[n]) for n in employees}
-this_month_duties = {n: 0 for n in employees}
-c_counts = {n: 0 for n in employees}
-consecutive_days = {n: 0 for n in employees}
+duties = {n: 0 for n in employees}
 
 roster = {n: {d: "" for d in range(1, days_in_month + 1)} for n in employees}
 
 for d in range(1, days_in_month + 1):
 
-    available = []
-
-    for emp in employees:
-        if emp in st.session_state.leaves and d in st.session_state.leaves[emp]:
-            roster[emp][d] = 'L'
-            consecutive_days[emp] = 0
-        else:
-            available.append(emp)
-
-    available = sorted(available, key=lambda x: this_month_duties[x])
-
+    available = sorted(employees, key=lambda x: duties[x])
     workers = available[:24]
     off = available[24:]
 
     for emp in off:
-        roster[emp][d] = 'W/O' if SEQ[emp_state[emp]] == 'W/O' else 'X'
-        consecutive_days[emp] = 0
+        roster[emp][d] = 'W/O'
 
     assigned = set()
 
@@ -166,23 +117,17 @@ for d in range(1, days_in_month + 1):
 
             candidates = [e for e in workers if e not in assigned]
 
-            valid = []
-            for emp in candidates:
-                if shift == 'A' and d > 1 and roster[emp][d-1] == 'C':
-                    continue
-                valid.append(emp)
+            if shift == 'A':
+                candidates = [e for e in candidates if not (d > 1 and roster[e][d-1] == 'C')]
 
-            if not valid:
-                valid = candidates
+            if not candidates:
+                candidates = workers
 
-            valid.sort(key=lambda x: (this_month_duties[x], random.random()))
-            chosen = valid[0]
+            chosen = sorted(candidates, key=lambda x: (duties[x], random.random()))[0]
 
             roster[chosen][d] = shift
+            duties[chosen] += 1
             assigned.add(chosen)
-
-            this_month_duties[chosen] += 1
-            consecutive_days[chosen] += 1
 
             if SEQ[emp_state[chosen]] == shift:
                 emp_state[chosen] = (emp_state[chosen] + 1) % 7
@@ -190,7 +135,7 @@ for d in range(1, days_in_month + 1):
                 emp_state[chosen] = (SEQ.index(shift) + 1) % 7
 
 # ==========================================
-# EXCEL OUTPUT
+# WRITE TO EXCEL
 # ==========================================
 wb = load_workbook(TEMPLATE_FILE)
 ws = wb.active
@@ -205,11 +150,7 @@ output = io.BytesIO()
 wb.save(output)
 output.seek(0)
 
-# 🔥 SAVE FOR NEXT MONTH
-with open(SAVE_PATH, "wb") as f:
-    f.write(output.getbuffer())
-
-st.success("Roster Generated & Saved for next month ✅")
+st.success("Roster Generated ✅")
 
 st.download_button(
     "Download Roster",
