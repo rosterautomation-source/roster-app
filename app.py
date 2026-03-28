@@ -177,27 +177,34 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         month_abbr = target_month_name[:3].upper()
         ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
         
-        # DIGITAL ERASER: Sweeps through Row 3 to delete any "Ghost" data from 31-day months
-        for c in range(3, 50):
-            ws.cell(row=3, column=c, value=None)
+        # Define paint colors
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
+        no_fill = PatternFill(fill_type=None)
         
-        # Write headers and set column auto-sizes
+        # Write day headers and hardcode width to 5
         for d in range(1, days_in_month + 1):
             col_letter = get_column_letter(2+d)
             ws.cell(row=3, column=2+d, value=d)
-            ws.column_dimensions[col_letter].width = 3.5 
+            ws.column_dimensions[col_letter].width = 5 
             
         calc_col_start = 3 + days_in_month
         calc_headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
+        
+        # Write TOTAL and Shift headers with hardcoded widths
         for idx, header in enumerate(calc_headers):
             col_letter = get_column_letter(calc_col_start + idx)
             ws.cell(row=3, column=calc_col_start + idx, value=header)
             
-            # Widen the TOTAL column so it doesn't get cut off!
             if header == 'TOTAL':
-                ws.column_dimensions[col_letter].width = 6.5
+                ws.column_dimensions[col_letter].width = 10
             else:
-                ws.column_dimensions[col_letter].width = 4.5
+                ws.column_dimensions[col_letter].width = 5
+
+        # AGGRESSIVE GHOST ERASER: Clears the extra 'G' from row 3
+        for c in range(calc_col_start + len(calc_headers), 55):
+            ws.cell(row=3, column=c, value=None)
+            ws.cell(row=3, column=c).fill = no_fill
 
         last_day_col = get_column_letter(2 + days_in_month)
         tot_col = get_column_letter(calc_col_start)
@@ -211,23 +218,15 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
 
         last_employee_row = 3 + num_employees
 
-        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-        peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
-        no_fill = PatternFill(fill_type=None)
-
         for i, emp in enumerate(employees):
             r = 4 + i
             ws.cell(row=r, column=1, value=i+1)
             ws.cell(row=r, column=2, value=emp)
             
-            # DIGITAL ERASER: Clears old paint and ghost values from the row
-            for c in range(3, 50): 
-                ws.cell(row=r, column=c).fill = no_fill
-                ws.cell(row=r, column=c, value=None)
-            
             for d in range(1, days_in_month + 1): 
                 ws.cell(row=r, column=2+d, value=roster[emp][d])
                 
+            # Write Formulas
             ws[f'{tot_col}{r}'] = f'=SUM({a_col}{r}:{c_col}{r})'
             ws[f'{a_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"A*")'
             ws[f'{b_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"B*")'
@@ -237,8 +236,8 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws[f'{l_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"L*")'
             ws[f'{g_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"G*")'
 
-            # Paint the correct columns!
-            ws[f'{tot_col}{r}'].fill = yellow_fill # TOTAL is now Yellow!
+            # Paint the specific cells dynamically
+            ws[f'{tot_col}{r}'].fill = yellow_fill
             ws[f'{a_col}{r}'].fill = peach_fill
             ws[f'{b_col}{r}'].fill = peach_fill
             ws[f'{c_col}{r}'].fill = peach_fill
@@ -247,10 +246,17 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws[f'{l_col}{r}'].fill = peach_fill
             ws[f'{g_col}{r}'].fill = peach_fill
 
-        # DIGITAL ERASER: Clear old bottom formulas just in case
+            # AGGRESSIVE GHOST ERASER: Clears extra 'G' and leftover colors from the data rows
+            for c in range(calc_col_start + len(calc_headers), 55):
+                ws.cell(row=r, column=c, value=None)
+                ws.cell(row=r, column=c).fill = no_fill
+
+        # Write Bottom Formulas
         bottom_start = last_employee_row + 2
+        
+        # Clear any ghost formulas from the bottom
         for r_erase in range(bottom_start, bottom_start + 5):
-            for c_erase in range(3, 50):
+            for c_erase in range(3, 55):
                 ws.cell(row=r_erase, column=c_erase, value=None)
 
         ws[f'B{bottom_start}'] = "A"
