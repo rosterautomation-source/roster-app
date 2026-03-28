@@ -116,7 +116,7 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
         this_month_A = {n: 0 for n in employees}
         this_month_B = {n: 0 for n in employees}
         last_wo_day = {n: -10 for n in employees}
-        
+	target_C = {n: 0 for n in employees}        
         wo_counts = {n: 0 for n in employees}
         x_counts = {n: 0 for n in employees}
         consecutive_days = {n: 0 for n in employees}
@@ -191,10 +191,10 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     score += (target_per_shift - this_month_B[emp]) * 10
                     if this_month_B[emp] >= target_per_shift + 1:
                         score -= 100
-                elif shift == 'C':
-                    score += (target_per_shift - c_counts[emp]) * 12  # stronger for C
-                    if c_counts[emp] >= MAX_C_SHIFTS:
-                        score -= 100
+		elif shift == 'C':
+    		score += (target_C[emp] - c_counts[emp]) * 15
+    		if c_counts[emp] >= target_C[emp]:
+       	 	score -= 100
 
                 # Rotation preference
                 if SEQ[emp_state[emp]] == shift:
@@ -234,8 +234,8 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     # If empty → relax ONLY burnout constraint
                     if not valid:
                         for emp in candidates:
-                            if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
-                                continue
+			if shift == 'C' and c_counts[emp] >= target_C[emp]:
+   			 continue
                             valid.append(emp)
 
                     # If still empty → choose least violating (NO blind fallback)
@@ -250,6 +250,7 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     assigned_today.add(chosen)
 
                     this_month_duties[chosen] += 1
+			target_C[chosen] = round(this_month_duties[chosen] / 3)
                     consecutive_days[chosen] += 1
 
                     if shift == 'C':
