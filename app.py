@@ -111,6 +111,11 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
         emp_state = {n: get_state(emp_data_map[n]) for n in employees}
         this_month_duties = {n: 0 for n in employees}
         c_counts = {n: 0 for n in employees}
+        
+        # 🔥 NEW TRACKERS FOR A AND B BALANCE
+        this_month_A = {n: 0 for n in employees}
+        this_month_B = {n: 0 for n in employees}
+        
         wo_counts = {n: 0 for n in employees}
         x_counts = {n: 0 for n in employees}
         consecutive_days = {n: 0 for n in employees}
@@ -156,44 +161,77 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     x_counts[emp] += 1
                 consecutive_days[emp] = 0
 
+            # ============================
+            # STEP 3: SHIFT ASSIGNMENT (FINAL FIX)
+            # ============================
+
             shift_slots = {'C': 8, 'B': 8, 'A': 8}
             assigned_today = set()
 
+            # 🎯 Target per employee
+            target_per_shift = max(1, TARGET_TOTAL // 3)
+
             def shift_score(emp, shift):
                 score = 0
-                score += (TARGET_TOTAL - this_month_duties[emp]) * 8
 
-                if shift == 'C':
-                    score += (MAX_C_SHIFTS - c_counts[emp]) * 10
-                else:
-                    score -= c_counts[emp] * 2
+                # Balance total duties
+                score += (TARGET_TOTAL - this_month_duties[emp]) * 6
 
+                # 🔥 NEW: Shift balancing
+                if shift == 'A':
+                    score += (target_per_shift - this_month_A[emp]) * 8
+                elif shift == 'B':
+                    score += (target_per_shift - this_month_B[emp]) * 8
+                elif shift == 'C':
+                    score += (target_per_shift - c_counts[emp]) * 12  # stronger for C
+
+                # Penalize over-allocation
+                if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
+                    score -= 100
+
+                # Rotation preference (soft)
                 if SEQ[emp_state[emp]] == shift:
-                    score += 5
+                    score += 3
 
+                # Prevent burnout
                 if consecutive_days[emp] >= MAX_CONSECUTIVE:
                     score -= 100
 
+                # randomness
                 score += random.uniform(0, 1)
+
                 return score
 
+            # 🔁 Assign shifts safely
             for shift in ['C', 'B', 'A']:
-                candidates = [e for e in workers_today if e not in assigned_today]
-
                 for _ in range(8):
-                    candidates.sort(key=lambda x: shift_score(x, shift), reverse=True)
 
-                    chosen = None
+                    candidates = [e for e in workers_today if e not in assigned_today]
+
+                    # Filter valid candidates
+                    valid = []
                     for emp in candidates:
                         if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
                             continue
                         if consecutive_days[emp] >= MAX_CONSECUTIVE:
                             continue
-                        chosen = emp
-                        break
+                        valid.append(emp)
 
-                    if not chosen:
-                        chosen = candidates[0]
+                    # If no valid candidates → relax ONLY consecutive constraint (NOT C cap)
+                    if not valid:
+                        for emp in candidates:
+                            if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
+                                continue
+                            valid.append(emp)
+
+                    # Final fallback (very rare) → still avoid C overflow
+                    if not valid:
+                        valid = candidates
+
+                    # Sort based on improved scoring
+                    valid.sort(key=lambda x: shift_score(x, shift), reverse=True)
+
+                    chosen = valid[0]
 
                     roster[chosen][d] = shift
                     assigned_today.add(chosen)
@@ -201,11 +239,16 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     this_month_duties[chosen] += 1
                     consecutive_days[chosen] += 1
 
+                    # Track shift counts
                     if shift == 'C':
                         c_counts[chosen] += 1
+                    elif shift == 'A':
+                        this_month_A[chosen] += 1
+                    elif shift == 'B':
+                        this_month_B[chosen] += 1
 
+                    # Soft rotation
                     emp_state[chosen] = (emp_state[chosen] + 1) % 7
-                    candidates.remove(chosen)
 
         # ==========================================
         # 5. EXCEL FORMATTING & CALCULATIONS
