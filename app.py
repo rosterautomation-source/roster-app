@@ -7,13 +7,13 @@ st.set_page_config(page_title="Roster App", layout="wide")
 
 st.title("Roster Generator")
 
-LOAD FILE
+load file
 
 df = pd.read_excel("latest_roster.xlsx", skiprows=2)
 
 st.write("File Loaded Successfully")
 
-EXTRACT EMPLOYEES
+extract employees
 
 employees = []
 
@@ -24,14 +24,14 @@ employees.append(name)
 
 st.write("Total Employees:", len(employees))
 
-SETTINGS
+settings
 
 month = st.sidebar.selectbox("Month", ["April", "May", "June", "July"])
 year = st.sidebar.number_input("Year", 2024, 2050, 2026)
 
 days = 30
 
-GENERATE BUTTON
+generate
 
 if st.button("Generate Roster"):
 
@@ -39,7 +39,6 @@ roster = {}
 
 for emp in employees:
     roster[emp] = {}
-
     for d in range(1, days + 1):
         roster[emp][d] = ""
 
@@ -63,7 +62,6 @@ for d in range(1, days + 1):
 
         index = index + 1
 
-# WRITE TO EXCEL
 wb = load_workbook("Template.xlsx")
 ws = wb.active
 
