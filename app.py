@@ -4,11 +4,7 @@ import io
 import random
 from openpyxl import load_workbook
 
-# ==========================================
-
 # CONFIG
-
-# ==========================================
 
 st.set_page_config(page_title="Roster Automation", layout="wide")
 
@@ -19,24 +15,12 @@ SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
 "July", "August", "September", "October", "November", "December"]
 
-# ==========================================
+# LOAD FILE
 
-# LOAD FILE (AUTO)
-
-# ==========================================
-
-try:
 df_raw = pd.read_excel(SAVE_PATH, skiprows=2)
 st.success("Loaded latest roster automatically ✅")
-except Exception as e:
-st.error("latest_roster.xlsx not found in repo or failed to load")
-st.stop()
 
-# ==========================================
-
-# SETTINGS
-
-# ==========================================
+# UI
 
 st.title("📅 Roster Generator")
 
@@ -47,13 +31,7 @@ target_year = st.sidebar.number_input("Year", min_value=2024, max_value=2050, va
 target_month_num = MONTH_NAMES.index(target_month_name) + 1
 days_in_month = pd.Period(f'{target_year}-{target_month_num:02d}-01').days_in_month
 
-# ==========================================
-
 # DATA PREP
-
-# ==========================================
-
-total_col_idx = next((i for i, c in enumerate(df_raw.columns) if "TOTAL" in str(c).upper()), None)
 
 employees = []
 emp_data_map = {}
@@ -64,11 +42,7 @@ if name and name.lower() not in ["nan", "a", "b", "c", "total", "none"]:
 employees.append(name)
 emp_data_map[name] = row
 
-# ==========================================
-
 # STATE LOGIC
-
-# ==========================================
 
 def get_state(row):
 last_val, prev_val = None, None
@@ -90,11 +64,7 @@ if last_val == 'A':
 return 6 if prev_val == 'A' else 5
 return 0
 
-# ==========================================
-
-# GENERATE BUTTON
-
-# ==========================================
+# GENERATE
 
 if st.button("Generate Roster"):
 
@@ -137,9 +107,7 @@ for d in range(1, days_in_month + 1):
             else:
                 emp_state[chosen] = (SEQ.index(shift) + 1) % 7
 
-# ==========================================
-# WRITE TO EXCEL
-# ==========================================
+# WRITE EXCEL
 wb = load_workbook(TEMPLATE_FILE)
 ws = wb.active
 
