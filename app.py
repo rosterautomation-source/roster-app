@@ -3,7 +3,7 @@ import pandas as pd
 import io
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill # <-- New tool to paint background colors!
+from openpyxl.styles import PatternFill
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -175,22 +175,29 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         ws = wb.active
         
         month_abbr = target_month_name[:3].upper()
-        
-        # FIX 1: Write Title to B1 so it aligns with your template merge
         ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
+        
+        # DIGITAL ERASER: Sweeps through Row 3 to delete any "Ghost" data from 31-day months
+        for c in range(3, 50):
+            ws.cell(row=3, column=c, value=None)
         
         # Write headers and set column auto-sizes
         for d in range(1, days_in_month + 1):
             col_letter = get_column_letter(2+d)
             ws.cell(row=3, column=2+d, value=d)
-            ws.column_dimensions[col_letter].width = 3.5 # Auto size days
+            ws.column_dimensions[col_letter].width = 3.5 
             
         calc_col_start = 3 + days_in_month
         calc_headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
         for idx, header in enumerate(calc_headers):
             col_letter = get_column_letter(calc_col_start + idx)
             ws.cell(row=3, column=calc_col_start + idx, value=header)
-            ws.column_dimensions[col_letter].width = 4.5 # Auto size totals
+            
+            # Widen the TOTAL column so it doesn't get cut off!
+            if header == 'TOTAL':
+                ws.column_dimensions[col_letter].width = 6.5
+            else:
+                ws.column_dimensions[col_letter].width = 4.5
 
         last_day_col = get_column_letter(2 + days_in_month)
         tot_col = get_column_letter(calc_col_start)
@@ -204,7 +211,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
 
         last_employee_row = 3 + num_employees
 
-        # Set up our paint colors
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
         no_fill = PatternFill(fill_type=None)
@@ -214,15 +220,14 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws.cell(row=r, column=1, value=i+1)
             ws.cell(row=r, column=2, value=emp)
             
-            # 1. Clear old background paint from the template (so it's clean)
-            for c in range(3, 46): 
+            # DIGITAL ERASER: Clears old paint and ghost values from the row
+            for c in range(3, 50): 
                 ws.cell(row=r, column=c).fill = no_fill
+                ws.cell(row=r, column=c, value=None)
             
-            # 2. Write Daily Shifts
             for d in range(1, days_in_month + 1): 
                 ws.cell(row=r, column=2+d, value=roster[emp][d])
                 
-            # 3. Write Formulas
             ws[f'{tot_col}{r}'] = f'=SUM({a_col}{r}:{c_col}{r})'
             ws[f'{a_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"A*")'
             ws[f'{b_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"B*")'
@@ -232,8 +237,9 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws[f'{l_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"L*")'
             ws[f'{g_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"G*")'
 
-            # 4. FIX 2: Paint the correct columns digitally!
-            ws[f'{a_col}{r}'].fill = yellow_fill
+            # Paint the correct columns!
+            ws[f'{tot_col}{r}'].fill = yellow_fill # TOTAL is now Yellow!
+            ws[f'{a_col}{r}'].fill = peach_fill
             ws[f'{b_col}{r}'].fill = peach_fill
             ws[f'{c_col}{r}'].fill = peach_fill
             ws[f'{wo_col}{r}'].fill = peach_fill
@@ -241,8 +247,12 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws[f'{l_col}{r}'].fill = peach_fill
             ws[f'{g_col}{r}'].fill = peach_fill
 
-        # Write Bottom Formulas
+        # DIGITAL ERASER: Clear old bottom formulas just in case
         bottom_start = last_employee_row + 2
+        for r_erase in range(bottom_start, bottom_start + 5):
+            for c_erase in range(3, 50):
+                ws.cell(row=r_erase, column=c_erase, value=None)
+
         ws[f'B{bottom_start}'] = "A"
         ws[f'B{bottom_start+1}'] = "B"
         ws[f'B{bottom_start+2}'] = "C"
@@ -258,6 +268,8 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         out_stream.seek(0)
         
         new_name = f"ROSTER OF {month_abbr} {target_year} - Calculation.xlsx"
+        
+        # upload_to_drive(service, out_stream, new_name)
         
         st.balloons()
         st.success(f"🔥 Successfully generated! Click below to save your file: **{new_name}**")
