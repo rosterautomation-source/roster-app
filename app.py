@@ -6,7 +6,7 @@ from openpyxl.utils import get_column_letter
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from googleapiclient.errors import HttpError  # <-- This is the new bug catcher
+from googleapiclient.errors import HttpError
 
 # ==========================================
 # 1. CONFIGURATION
@@ -55,7 +55,6 @@ def upload_to_drive(service, file_stream, filename):
             supportsAllDrives=True
         ).execute()
     except HttpError as error:
-        # If Google blocks it, it will print the exact reason here!
         st.error(f"❌ Google Drive Error: {error.content.decode('utf-8')}")
         st.stop()
 
@@ -175,7 +174,9 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         ws = wb.active
         
         month_abbr = target_month_name[:3].upper()
-        ws['A1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
+        
+        # --- FIX: Changed A1 to B1 so it aligns with your template ---
+        ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
         
         for d in range(1, days_in_month + 1):
             ws.cell(row=3, column=2+d, value=d)
@@ -230,8 +231,10 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         out_stream.seek(0)
         
         new_name = f"ROSTER OF {month_abbr} {target_year} - Calculation.xlsx"
-        #upload_to_drive(service, out_stream, new_name)
+        
+        # --- FIX: This is commented out to avoid the Google Drive Quota Block ---
+        # upload_to_drive(service, out_stream, new_name)
         
         st.balloons()
-        st.success(f"🔥 Successfully saved to Drive as: **{new_name}**")
+        st.success(f"🔥 Successfully generated! Click below to save your file: **{new_name}**")
         st.download_button("Download Now", data=out_stream, file_name=new_name)
