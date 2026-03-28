@@ -85,20 +85,17 @@ if st.sidebar.button("Register Leave"):
 # 3. ADVANCED BALANCING ENGINE
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Calculating fair C-shift distribution..."):
+    with st.spinner("Calculating fair distribution..."):
         employees = names_list
         emp_state = {name: get_state(row) for name, row in zip(employees, df_prev[df_prev['NAME'].isin(employees)].to_dict('records'))}
         
-        # Track counts
         duty_total = {emp: 0 for emp in employees}
         c_counts = {emp: 0 for emp in employees}
         roster = {emp: {d: None for d in range(1, days_in_month + 1)} for emp in employees}
 
-        # Calculate C-Limits per person (Pro-rated for leaves)
         c_limits = {}
         for emp in employees:
             present_days = days_in_month - len(st.session_state.leaves.get(emp, []))
-            # Standard: 8 C's for 24 duties. So Max C = (Present Days / 3)
             c_limits[emp] = math.ceil(present_days / 3)
 
         for d in range(1, days_in_month + 1):
@@ -111,63 +108,36 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
                 else:
                     available.append(emp)
 
-            # Sort: Prioritize those with lowest total duties
             available.sort(key=lambda x: duty_total[x])
 
-            # --- STEP 1: FILL C SHIFTS (The constrained one) ---
             c_assigned = 0
-            # Priority 1: Needs C + Prefers C + Under Limit
             for emp in available[:]:
                 if c_assigned < 8 and SEQ[emp_state[emp]] == 'C' and (c_counts[emp] < c_limits[emp] or duty_total[emp] >= 24):
-                    roster[emp][d] = 'C'
-                    c_counts[emp] += 1
-                    duty_total[emp] += 1
-                    c_assigned += 1
-                    emp_state[emp] = (emp_state[emp] + 1) % 7
-                    available.remove(emp)
+                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1
+                    emp_state[emp] = (emp_state[emp] + 1) % 7; available.remove(emp)
 
-            # Priority 2: Anyone under Limit
             for emp in available[:]:
                 if c_assigned < 8 and (c_counts[emp] < c_limits[emp] or duty_total[emp] >= 24):
-                    roster[emp][d] = 'C'
-                    c_counts[emp] += 1
-                    duty_total[emp] += 1
-                    c_assigned += 1
-                    emp_state[emp] = (SEQ.index('C') + 1) % 7
-                    available.remove(emp)
+                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1
+                    emp_state[emp] = (SEQ.index('C') + 1) % 7; available.remove(emp)
             
-            # Priority 3: Forced C (If still not 8)
             for emp in available[:]:
                 if c_assigned < 8:
-                    roster[emp][d] = 'C'
-                    c_counts[emp] += 1
-                    duty_total[emp] += 1
-                    c_assigned += 1
-                    available.remove(emp)
+                    roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1; available.remove(emp)
 
-            # --- STEP 2: FILL B AND A (Fair distribution) ---
             for s in ['B', 'A']:
                 s_assigned = 0
-                # Try preferred first
                 for emp in available[:]:
                     if s_assigned < 8 and SEQ[emp_state[emp]] == s:
-                        roster[emp][d] = s
-                        duty_total[emp] += 1
-                        s_assigned += 1
-                        emp_state[emp] = (emp_state[emp] + 1) % 7
-                        available.remove(emp)
-                # Fill remaining
+                        roster[emp][d] = s; duty_total[emp] += 1; s_assigned += 1
+                        emp_state[emp] = (emp_state[emp] + 1) % 7; available.remove(emp)
                 while s_assigned < 8 and available:
                     emp = available.pop(0)
-                    roster[emp][d] = s
-                    duty_total[emp] += 1
-                    s_assigned += 1
+                    roster[emp][d] = s; duty_total[emp] += 1; s_assigned += 1
                     emp_state[emp] = (SEQ.index(s) + 1) % 7
 
-            # --- STEP 3: W/O ---
             for emp in available:
-                roster[emp][d] = 'W/O'
-                emp_state[emp] = 0
+                roster[emp][d] = 'W/O'; emp_state[emp] = 0
 
         # ==========================================
         # 4. EXCEL WRITING
@@ -202,7 +172,6 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=end_totals)
         ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").font = Font(bold=True, size=16); ws.cell(row=2, column=start_totals).alignment = center
 
-        # Header Details
         for d in range(1, days_in_month + 1):
             ws.cell(row=3, column=d+2, value=d).alignment = center
             ws.column_dimensions[get_column_letter(d+2)].width = 5
@@ -220,31 +189,31 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             for d in range(1, days_in_month + 1):
                 ws.cell(row=r, column=d+2, value=roster[emp][d]).alignment = center
             
-            # Formulas
             t_ltr = get_column_letter(start_totals)
             last_d_ltr = get_column_letter(days_in_month + 2)
             ws[f'{t_ltr}{r}'] = f'=SUM({get_column_letter(start_totals+1)}{r}:{get_column_letter(start_totals+3)}{r})'
             for i_h, h_code in enumerate(['A*', 'B*', 'C*', 'W/O*', 'X*', 'L*', 'G*']):
                 ws.cell(row=r, column=start_totals+1+i_h, value=f'=COUNTIF(C{r}:{last_d_ltr}{r},"{h_code}")')
 
-            # Formatting
             ws[f'{t_ltr}{r}'].fill = yellow_fill; ws[f'{t_ltr}{r}'].font = Font(bold=True)
             for cp in range(start_totals+1, end_totals+1): ws.cell(row=r, column=cp).fill = peach_fill
             for c in range(1, end_totals + 1):
                 ws.cell(row=r, column=c).border = Border(left=thick_blue if c==1 else thin, right=thick_blue if c==end_totals else thin, top=thin, bottom=thin if idx<num_emp-1 else thick_blue)
 
-        # Bottom Summary Box
+        # Bottom Summary Box (FIXED LINE 244 ERROR HERE)
         s_row = num_emp + 6
         for i, stype in enumerate(["A", "B", "C"]):
             curr_r = s_row + i
             ws.cell(row=curr_r, column=2, value=stype).font = Font(bold=True)
             ws.cell(row=curr_r, column=2).fill = yellow_fill; ws.cell(row=curr_r, column=2).alignment = center; ws.cell(row=curr_r, column=2).border = all_border
             for d in range(1, days_in_month + 1):
-                cltr = get_column_letter(d+2)
-                c_cell = ws.cell(row=curr_r, column=cltr, value=f'=COUNTIF({cltr}4:{cltr}{num_emp+3},"{stype}*")')
+                col_idx = d + 2
+                cltr = get_column_letter(col_idx)
+                # FIX: column=col_idx (integer) instead of cltr (string)
+                c_cell = ws.cell(row=curr_r, column=col_idx, value=f'=COUNTIF({cltr}4:{cltr}{num_emp+3},"{stype}*")')
                 c_cell.fill = yellow_fill; c_cell.alignment = center; c_cell.border = all_border
 
         out = io.BytesIO()
         wb.save(out)
         st.balloons()
-        st.download_button("Download Intelligent Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
+        st.download_button("Download Final Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
