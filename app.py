@@ -10,7 +10,7 @@ from openpyxl.styles import PatternFill, Alignment, Border, Side, Font
 # ==========================================
 # 1. CONFIGURATION & CONSTANTS
 # ==========================================
-st.set_page_config(page_title="Roster Automation", layout="wide")
+st.set_page_config(page_title="Pro Roster Automation", layout="wide")
 
 DRIVE_FOLDER_ID = "1pcZWYGXCC1axVDXWtXp1YyQJ79WVeivr"
 TEMPLATE_FILE = "Template.xlsx"
@@ -112,9 +112,10 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
         this_month_duties = {n: 0 for n in employees}
         c_counts = {n: 0 for n in employees}
         
-        # 🔥 NEW TRACKERS FOR A AND B BALANCE
+        # 🔥 NEW TRACKERS
         this_month_A = {n: 0 for n in employees}
         this_month_B = {n: 0 for n in employees}
+        last_wo_day = {n: -10 for n in employees}
         
         wo_counts = {n: 0 for n in employees}
         x_counts = {n: 0 for n in employees}
@@ -152,13 +153,17 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
             workers_today = available[:24]
             off_today = available[24:]
 
+            # 🔥 NEW OFF ASSIGNMENT
             for emp in off_today:
-                if wo_counts[emp] < MIN_WO:
+                # Prefer W/O only if spacing is maintained
+                if wo_counts[emp] < MIN_WO and (d - last_wo_day[emp]) >= 5:
                     roster[emp][d] = 'W/O'
                     wo_counts[emp] += 1
+                    last_wo_day[emp] = d
                 else:
                     roster[emp][d] = 'X'
                     x_counts[emp] += 1
+
                 consecutive_days[emp] = 0
 
             # ============================
@@ -179,26 +184,28 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
 
                 # 🔥 NEW: Shift balancing
                 if shift == 'A':
-                    score += (target_per_shift - this_month_A[emp]) * 8
+                    score += (target_per_shift - this_month_A[emp]) * 10
+                    if this_month_A[emp] >= target_per_shift + 1:
+                        score -= 100
                 elif shift == 'B':
-                    score += (target_per_shift - this_month_B[emp]) * 8
+                    score += (target_per_shift - this_month_B[emp]) * 10
+                    if this_month_B[emp] >= target_per_shift + 1:
+                        score -= 100
                 elif shift == 'C':
                     score += (target_per_shift - c_counts[emp]) * 12  # stronger for C
+                    if c_counts[emp] >= MAX_C_SHIFTS:
+                        score -= 100
 
-                # Penalize over-allocation
-                if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
-                    score -= 100
-
-                # Rotation preference (soft)
+                # Rotation preference
                 if SEQ[emp_state[emp]] == shift:
                     score += 3
 
-                # Prevent burnout
+                # Burnout prevention
                 if consecutive_days[emp] >= MAX_CONSECUTIVE:
                     score -= 100
 
-                # randomness
-                score += random.uniform(0, 1)
+                # slight randomness
+                score += random.uniform(0, 0.5)
 
                 return score
 
@@ -208,30 +215,36 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
 
                     candidates = [e for e in workers_today if e not in assigned_today]
 
-                    # Filter valid candidates
+                    # Filter best valid candidates
                     valid = []
                     for emp in candidates:
+
+                        # Strict limits
                         if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
+                            continue
+                        if shift == 'A' and this_month_A[emp] >= target_per_shift + 1:
+                            continue
+                        if shift == 'B' and this_month_B[emp] >= target_per_shift + 1:
                             continue
                         if consecutive_days[emp] >= MAX_CONSECUTIVE:
                             continue
+
                         valid.append(emp)
 
-                    # If no valid candidates → relax ONLY consecutive constraint (NOT C cap)
+                    # If empty → relax ONLY burnout constraint
                     if not valid:
                         for emp in candidates:
                             if shift == 'C' and c_counts[emp] >= MAX_C_SHIFTS:
                                 continue
                             valid.append(emp)
 
-                    # Final fallback (very rare) → still avoid C overflow
+                    # If still empty → choose least violating (NO blind fallback)
                     if not valid:
-                        valid = candidates
-
-                    # Sort based on improved scoring
-                    valid.sort(key=lambda x: shift_score(x, shift), reverse=True)
-
-                    chosen = valid[0]
+                        candidates.sort(key=lambda x: shift_score(x, shift), reverse=True)
+                        chosen = candidates[0]
+                    else:
+                        valid.sort(key=lambda x: shift_score(x, shift), reverse=True)
+                        chosen = valid[0]
 
                     roster[chosen][d] = shift
                     assigned_today.add(chosen)
@@ -239,7 +252,6 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     this_month_duties[chosen] += 1
                     consecutive_days[chosen] += 1
 
-                    # Track shift counts
                     if shift == 'C':
                         c_counts[chosen] += 1
                     elif shift == 'A':
@@ -247,7 +259,6 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     elif shift == 'B':
                         this_month_B[chosen] += 1
 
-                    # Soft rotation
                     emp_state[chosen] = (emp_state[chosen] + 1) % 7
 
         # ==========================================
