@@ -3,7 +3,7 @@ import pandas as pd
 import io
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, Alignment, Border, Side
+from openpyxl.styles import PatternFill, Alignment, Border, Side, Font # Added Font for Bolding
 
 # ==========================================
 # 1. CONFIGURATION
@@ -84,7 +84,7 @@ if st.sidebar.button("Register Leave"):
 # 3. GENERATION
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Calculating and Formatting..."):
+    with st.spinner("Applying Merges and Bolding..."):
         employees = df_prev.dropna(subset=['NAME'])['NAME'].tolist()
         emp_state = {name: get_state(row) for name, row in zip(employees, df_prev.dropna(subset=['NAME']).to_dict('records'))}
         
@@ -116,18 +116,38 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
         center = Alignment(horizontal='center', vertical='center')
+        bold_font = Font(bold=True) # Define Bold Style
 
         # 3. DYNAMIC LAYOUT
         start_totals = days_in_month + 3
         end_totals = start_totals + 7
         
-        # Title & Attendance Headers
+        # --- TITLE (BOLD) ---
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
-        ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}").alignment = center
+        title_cell = ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}")
+        title_cell.alignment = center
+        title_cell.font = bold_font
+
+        # --- S No & NAME (MERGE A2:A3 and B2:B3) ---
+        ws.merge_cells('A2:A3')
+        ws['A2'] = "S No"
+        ws['A2'].alignment = center
+        ws['A2'].font = bold_font
+        
+        ws.merge_cells('B2:B3')
+        ws['B2'] = "NAME"
+        ws['B2'].alignment = center
+        ws['B2'].font = bold_font
+
+        # --- ATTENDANCE (MERGE) ---
         ws.merge_cells(start_row=2, start_column=3, end_row=2, end_column=days_in_month+2)
         ws.cell(row=2, column=3, value="ATTENDANCE").alignment = center
+
+        # --- TOTAL SHIFTS (BOLD & MERGE) ---
         ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=end_totals)
-        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").alignment = center
+        total_shift_header = ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS")
+        total_shift_header.alignment = center
+        total_shift_header.font = bold_font
 
         # 4. WRITE HEADERS
         for d in range(1, days_in_month + 1):
@@ -164,30 +184,15 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             ws[f'{get_column_letter(start_totals+6)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"L*")'
             ws[f'{get_column_letter(start_totals+7)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"G*")'
 
-            # Fill Colors
             ws[f'{tot_ltr}{r}'].fill = yellow_fill
             for i_fill in range(1, 8):
                 ws.cell(row=r, column=start_totals + i_fill).fill = peach_fill
 
-            # Apply Borders to data row
             for c in range(1, end_totals + 1):
                 cell = ws.cell(row=r, column=c)
                 r_side = thick_blue if c == end_totals else thin
                 l_side = thick_blue if c == 1 else thin
                 cell.border = Border(left=l_side, right=r_side, top=thin, bottom=thin)
-
-        # 6. BOTTOM TOTALS (A, B, C Counts per day)
-        bottom_r = num_emp + 5
-        ws.cell(row=bottom_r, column=2, value="A").alignment = center
-        ws.cell(row=bottom_r+1, column=2, value="B").alignment = center
-        ws.cell(row=bottom_r+2, column=2, value="C").alignment = center
-        
-        for d in range(1, days_in_month + 1):
-            col_ltr = get_column_letter(d + 2)
-            ws[f'{col_ltr}{bottom_r}'] = f'=COUNTIF({col_ltr}4:{col_ltr}{num_emp+3},"A*")'
-            ws[f'{col_ltr}{bottom_start+1 if "bottom_start" in locals() else bottom_r+1}'] = f'=COUNTIF({col_ltr}4:{col_letter if "col_letter" in locals() else col_ltr}{num_emp+3},"B*")'
-            ws[f'{col_ltr}{bottom_r+1}'] = f'=COUNTIF({col_ltr}4:{col_ltr}{num_emp+3},"B*")'
-            ws[f'{col_ltr}{bottom_r+2}'] = f'=COUNTIF({col_ltr}4:{col_ltr}{num_emp+3},"C*")'
 
         # Apply borders to headers (Row 1-3)
         for r_h in range(1, 4):
@@ -196,6 +201,18 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
                 r_side = thick_blue if c_h == end_totals else thin
                 l_side = thick_blue if c_h == 1 else thin
                 cell.border = Border(left=l_side, right=r_side, top=thin, bottom=thin)
+
+        # Bottom Totals Positioning
+        bottom_r = num_emp + 5
+        ws.cell(row=bottom_r, column=2, value="A").alignment = center
+        ws.cell(row=bottom_r+1, column=2, value="B").alignment = center
+        ws.cell(row=bottom_r+2, column=2, value="C").alignment = center
+        
+        for d in range(1, days_in_month + 1):
+            col_ltr = get_column_letter(d + 2)
+            ws[f'{col_ltr}{bottom_r}'] = f'=COUNTIF({col_ltr}4:{col_ltr}{num_emp+3},"A*")'
+            ws[f'{col_ltr}{bottom_r+1}'] = f'=COUNTIF({col_ltr}4:{col_ltr}{num_emp+3},"B*")'
+            ws[f'{col_ltr}{bottom_r+2}'] = f'=COUNTIF({col_ltr}4:{col_ltr}{num_emp+3},"C*")'
 
         out = io.BytesIO()
         wb.save(out)
