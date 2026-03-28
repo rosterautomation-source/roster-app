@@ -1,134 +1,77 @@
 import streamlit as st
 import pandas as pd
 import io
-import random
 from openpyxl import load_workbook
 
-st.set_page_config(page_title="Roster Automation", layout="wide")
+# BASIC CONFIG
+
+st.set_page_config(page_title="Roster App", layout="wide")
 
 TEMPLATE_FILE = "Template.xlsx"
-SAVE_PATH = "latest_roster.xlsx"
-
-SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
-MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
-"July", "August", "September", "October", "November", "December"]
-
-# LOAD FILE
-
-df_raw = pd.read_excel(SAVE_PATH, skiprows=2)
-st.success("Loaded latest roster automatically")
+DATA_FILE = "latest_roster.xlsx"
 
 st.title("Roster Generator")
 
-target_month_name = st.sidebar.selectbox("Month", MONTH_NAMES, index=3)
-target_year = st.sidebar.number_input("Year", min_value=2024, max_value=2050, value=2026)
+# LOAD BASE FILE
 
-target_month_num = MONTH_NAMES.index(target_month_name) + 1
-days_in_month = pd.Period(f'{target_year}-{target_month_num:02d}-01').days_in_month
+df = pd.read_excel(DATA_FILE, skiprows=2)
+
+# GET EMPLOYEES
 
 employees = []
-emp_data_map = {}
-
-for _, row in df_raw.iterrows():
+for _, row in df.iterrows():
 name = str(row.iloc[1]).strip()
-if name and name.lower() not in ["nan", "a", "b", "c", "total", "none"]:
+if name and name.lower() not in ["nan", "total", "a", "b", "c"]:
 employees.append(name)
-emp_data_map[name] = row
 
-def get_state(row):
-last_val = None
-prev_val = None
+# SETTINGS
 
-```
-for d in range(31, 0, -1):
-    col = str(d)
-    if col in row and pd.notna(row[col]):
-        val = str(row[col]).strip().upper()
-        if val in ['A', 'B', 'C', 'W/O', 'X', 'L']:
-            if last_val is None:
-                last_val = val
-            elif prev_val is None:
-                prev_val = val
-                break
+month = st.sidebar.selectbox("Month", ["April", "May", "June", "July"])
+year = st.sidebar.number_input("Year", 2024, 2050, 2026)
 
-if last_val == 'C':
-    return 2 if prev_val == 'C' else 1
-if last_val == 'B':
-    return 4 if prev_val == 'B' else 3
-if last_val == 'A':
-    return 6 if prev_val == 'A' else 5
+days = 30
 
-return 0
-```
+# GENERATE BUTTON
 
 if st.button("Generate Roster"):
 
 ```
-emp_state = {}
-duties = {}
 roster = {}
 
 for emp in employees:
-    emp_state[emp] = get_state(emp_data_map[emp])
-    duties[emp] = 0
     roster[emp] = {}
-
-    for d in range(1, days_in_month + 1):
+    for d in range(1, days+1):
         roster[emp][d] = ""
 
-for d in range(1, days_in_month + 1):
+for d in range(1, days+1):
 
-    available = sorted(employees, key=lambda x: duties[x])
-
-    workers = available[:24]
-    off = available[24:]
+    workers = employees[:24]
+    off = employees[24:]
 
     for emp in off:
-        roster[emp][d] = 'W/O'
+        roster[emp][d] = "W/O"
 
-    assigned = []
+    i = 0
 
-    for shift in ['C', 'B', 'A']:
+    for emp in workers:
+        if i < 8:
+            roster[emp][d] = "C"
+        elif i < 16:
+            roster[emp][d] = "B"
+        else:
+            roster[emp][d] = "A"
+        i += 1
 
-        count = 0
-
-        while count < 8:
-
-            candidates = []
-
-            for e in workers:
-                if e not in assigned:
-
-                    if shift == 'A' and d > 1 and roster[e][d-1] == 'C':
-                        continue
-
-                    candidates.append(e)
-
-            if not candidates:
-                candidates = workers
-
-            chosen = sorted(candidates, key=lambda x: (duties[x], random.random()))[0]
-
-            roster[chosen][d] = shift
-            duties[chosen] += 1
-            assigned.append(chosen)
-
-            if SEQ[emp_state[chosen]] == shift:
-                emp_state[chosen] = (emp_state[chosen] + 1) % 7
-            else:
-                emp_state[chosen] = (SEQ.index(shift) + 1) % 7
-
-            count += 1
-
+# WRITE TO TEMPLATE
 wb = load_workbook(TEMPLATE_FILE)
 ws = wb.active
 
 for i, emp in enumerate(employees):
-    row_idx = i + 4
-    ws.cell(row=row_idx, column=2, value=emp)
+    row = i + 4
+    ws.cell(row=row, column=2, value=emp)
 
-    for d in range(1, days_in_month + 1):
-        ws.cell(row=row_idx, column=d+2, value=roster[emp][d])
+    for d in range(1, days+1):
+        ws.cell(row=row, column=d+2, value=roster[emp][d])
 
 output = io.BytesIO()
 wb.save(output)
