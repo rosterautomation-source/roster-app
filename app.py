@@ -6,6 +6,7 @@ from openpyxl.utils import get_column_letter
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.errors import HttpError  # <-- This is the new bug catcher
 
 # ==========================================
 # 1. CONFIGURATION
@@ -19,7 +20,7 @@ SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 # ==========================================
-# 2. GOOGLE DRIVE CONNECTION (WITH WORKSPACE BYPASS)
+# 2. GOOGLE DRIVE CONNECTION
 # ==========================================
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_info(
@@ -30,7 +31,6 @@ def get_drive_service():
 
 def get_latest_roster(service):
     query = f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
-    # Added includeItemsFromAllDrives and supportsAllDrives to bypass Workspace restrictions
     results = service.files().list(
         q=query, 
         orderBy="createdTime desc", 
@@ -47,12 +47,17 @@ def get_latest_roster(service):
 def upload_to_drive(service, file_stream, filename):
     file_metadata = {'name': filename, 'parents': [DRIVE_FOLDER_ID]}
     media = MediaIoBaseUpload(file_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    # Added supportsAllDrives=True to bypass Workspace upload restrictions
-    service.files().create(
-        body=file_metadata, 
-        media_body=media,
-        supportsAllDrives=True
-    ).execute()
+    
+    try:
+        service.files().create(
+            body=file_metadata, 
+            media_body=media,
+            supportsAllDrives=True
+        ).execute()
+    except HttpError as error:
+        # If Google blocks it, it will print the exact reason here!
+        st.error(f"❌ Google Drive Error: {error.content.decode('utf-8')}")
+        st.stop()
 
 # ==========================================
 # 3. ROSTER ENGINE
