@@ -84,7 +84,7 @@ if st.sidebar.button("Register Leave"):
 # 3. GENERATION
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Finalizing Formatting..."):
+    with st.spinner("Setting precision widths..."):
         employees = df_prev.dropna(subset=['NAME'])['NAME'].tolist()
         emp_state = {name: get_state(row) for name, row in zip(employees, df_prev.dropna(subset=['NAME']).to_dict('records'))}
         
@@ -117,19 +117,17 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
         center = Alignment(horizontal='center', vertical='center')
         
-        # --- FONT SIZE LOGIC ---
-        title_font = Font(bold=True, size=20)   # Size 20 for Title
-        header_font = Font(bold=True, size=16)  # Size 16 for Main Sections
-        normal_bold = Font(bold=True, size=11)
+        title_font = Font(bold=True, size=20)   
+        header_font = Font(bold=True, size=16)  
 
         # 3. DYNAMIC LAYOUT
         start_totals = days_in_month + 3
         end_totals = start_totals + 7
         
-        # Lock Column A Width
+        # A Column size 6.43
         ws.column_dimensions['A'].width = 6.43
 
-        # Title Merge & Font Size 20
+        # Title (Size 20)
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
         title_cell = ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}")
         title_cell.alignment = center
@@ -158,17 +156,21 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         total_shift_header.alignment = center
         total_shift_header.font = header_font
 
-        # 4. WRITE HEADERS
+        # 4. WRITE HEADERS & FIXED WIDTHS
         for d in range(1, days_in_month + 1):
             col = d + 2
             ws.cell(row=3, column=col, value=d).alignment = center
-            ws.column_dimensions[get_column_letter(col)].width = 5
+            ws.column_dimensions[get_column_letter(col)].width = 5 # Day cols
             
         headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
         for i, h in enumerate(headers):
             col = start_totals + i
             ws.cell(row=3, column=col, value=h).alignment = center
-            ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
+            # --- FIXED WIDTHS HERE ---
+            if h == 'TOTAL':
+                ws.column_dimensions[get_column_letter(col)].width = 10
+            else:
+                ws.column_dimensions[get_column_letter(col)].width = 5 # Fixed to 5 exactly
 
         # 5. WRITE DATA
         num_emp = len(employees)
@@ -194,7 +196,7 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             ws[f'{get_column_letter(start_totals+7)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"G*")'
 
             ws[f'{tot_ltr}{r}'].fill = yellow_fill
-            ws[f'{tot_ltr}{r}'].font = Font(bold=True) # Make total numbers bold too
+            ws[f'{tot_ltr}{r}'].font = Font(bold=True)
             
             for i_fill in range(1, 8):
                 ws.cell(row=r, column=start_totals + i_fill).fill = peach_fill
