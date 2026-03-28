@@ -113,15 +113,19 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
 
         consecutive_days = {n: 0 for n in employees}
         roster = {n: {d: "" for d in range(1, days_in_month + 1)} for n in employees}
+# Decide who will get 25 duties (others get 24)
+extra_duties_needed = (days_in_month * 24) % len(employees)
+
+sorted_emps = sorted(employees, key=lambda x: prev_totals[x])
+extra_duty_emps = set(sorted_emps[:extra_duties_needed])
+def get_c_limit(emp):
+    if emp in extra_duty_emps:
+        return 9
+    else:
+        return 8
 
         # 🔥 STRICT C LIMIT FUNCTION
-        def get_c_limit(emp):
-            if this_month_duties[emp] >= 25:
-                return 9
-            elif this_month_duties[emp] >= 24:
-                return 8
-            else:
-                return 8
+
 
         for d in range(1, days_in_month + 1):
 
