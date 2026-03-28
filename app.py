@@ -82,10 +82,10 @@ if st.sidebar.button("Register Leave"):
     st.sidebar.success("Added!")
 
 # ==========================================
-# 3. ADVANCED BALANCING ENGINE
+# 3. STRICT BALANCING ENGINE
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Calculating fair distribution..."):
+    with st.spinner("Applying Strict C-Shift Limits..."):
         employees = names_list
         emp_state = {name: get_state(row) for name, row in zip(employees, df_prev[df_prev['NAME'].isin(employees)].to_dict('records'))}
         
@@ -93,10 +93,12 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         c_counts = {emp: 0 for emp in employees}
         roster = {emp: {d: None for d in range(1, days_in_month + 1)} for emp in employees}
 
+        # Calculate Monthly C-Limits
         c_limits = {}
         for emp in employees:
             present_days = days_in_month - len(st.session_state.leaves.get(emp, []))
-            c_limits[emp] = math.ceil(present_days / 3)
+            # Rule: Max 8 C's for 24 duties. Limit = 8, but lower if they have lots of leave.
+            c_limits[emp] = min(8, math.ceil(present_days / 3))
 
         for d in range(1, days_in_month + 1):
             daily_targets = {'C': 8, 'B': 8, 'A': 8}
@@ -108,23 +110,29 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
                 else:
                     available.append(emp)
 
+            # Fairness sort: Lowest duties first
             available.sort(key=lambda x: duty_total[x])
 
+            # 1. ASSIGN C-SHIFTS (Strict Budgeting)
             c_assigned = 0
+            # Pass A: Preferred C AND Under Limit
             for emp in available[:]:
-                if c_assigned < 8 and SEQ[emp_state[emp]] == 'C' and (c_counts[emp] < c_limits[emp] or duty_total[emp] >= 24):
+                if c_assigned < 8 and SEQ[emp_state[emp]] == 'C' and c_counts[emp] < c_limits[emp]:
                     roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1
                     emp_state[emp] = (emp_state[emp] + 1) % 7; available.remove(emp)
 
+            # Pass B: Not preferred, but Under Limit
             for emp in available[:]:
-                if c_assigned < 8 and (c_counts[emp] < c_limits[emp] or duty_total[emp] >= 24):
+                if c_assigned < 8 and c_counts[emp] < c_limits[emp]:
                     roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1
                     emp_state[emp] = (SEQ.index('C') + 1) % 7; available.remove(emp)
             
+            # Pass C: Safety Valve (Only if target 8 not met, give to people with > 24 duties)
             for emp in available[:]:
-                if c_assigned < 8:
+                if c_assigned < 8 and duty_total[emp] >= 24:
                     roster[emp][d] = 'C'; c_counts[emp] += 1; duty_total[emp] += 1; c_assigned += 1; available.remove(emp)
 
+            # 2. ASSIGN B AND A
             for s in ['B', 'A']:
                 s_assigned = 0
                 for emp in available[:]:
@@ -136,6 +144,7 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
                     roster[emp][d] = s; duty_total[emp] += 1; s_assigned += 1
                     emp_state[emp] = (SEQ.index(s) + 1) % 7
 
+            # 3. W/O
             for emp in available:
                 roster[emp][d] = 'W/O'; emp_state[emp] = 0
 
@@ -160,7 +169,6 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         end_totals = start_totals + 7
         ws.column_dimensions['A'].width = 6.43
 
-        # Title/Headers
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
         t_cell = ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}")
         t_cell.font = Font(bold=True, size=20); t_cell.alignment = center
@@ -200,17 +208,16 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             for c in range(1, end_totals + 1):
                 ws.cell(row=r, column=c).border = Border(left=thick_blue if c==1 else thin, right=thick_blue if c==end_totals else thin, top=thin, bottom=thin if idx<num_emp-1 else thick_blue)
 
-        # Bottom Summary Box (FIXED LINE 244 ERROR HERE)
+        # Summary Box
         s_row = num_emp + 6
         for i, stype in enumerate(["A", "B", "C"]):
             curr_r = s_row + i
             ws.cell(row=curr_r, column=2, value=stype).font = Font(bold=True)
             ws.cell(row=curr_r, column=2).fill = yellow_fill; ws.cell(row=curr_r, column=2).alignment = center; ws.cell(row=curr_r, column=2).border = all_border
             for d in range(1, days_in_month + 1):
-                col_idx = d + 2
-                cltr = get_column_letter(col_idx)
-                # FIX: column=col_idx (integer) instead of cltr (string)
-                c_cell = ws.cell(row=curr_r, column=col_idx, value=f'=COUNTIF({cltr}4:{cltr}{num_emp+3},"{stype}*")')
+                col_i = d + 2
+                cltr = get_column_letter(col_i)
+                c_cell = ws.cell(row=curr_r, column=col_i, value=f'=COUNTIF({cltr}4:{cltr}{num_emp+3},"{stype}*")')
                 c_cell.fill = yellow_fill; c_cell.alignment = center; c_cell.border = all_border
 
         out = io.BytesIO()
