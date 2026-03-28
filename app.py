@@ -14,6 +14,7 @@ st.set_page_config(page_title="Roster Automation", layout="wide")
 DRIVE_FOLDER_ID = "1pcZWYGXCC1axVDXWtXp1YyQJ79WVeivr" 
 TEMPLATE_FILE = "Template.xlsx"
 
+# Standard Rotation: C-C-B-B-A-A-W/O
 SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
@@ -51,7 +52,7 @@ def get_state(row):
     return 0
 
 # ==========================================
-# 2. WEB UI & DATA PREP
+# 2. DATA LOADING
 # ==========================================
 st.title("📅 Monthly Roster Generator")
 
@@ -93,10 +94,10 @@ if st.sidebar.button("Register Leave"):
     st.sidebar.success("Added!")
 
 # ==========================================
-# 3. ADVANCED FAIRNESS ENGINE
+# 3. FAIRNESS BALANCING ENGINE
 # ==========================================
 if st.button(f"Generate Final Balanced Roster", type="primary"):
-    with st.spinner("Allotting shifts fairly..."):
+    with st.spinner("Applying Rotation and Mandatory Offs..."):
         emp_state = {n: get_state(emp_data_map[n]) for n in employees}
         duty_history = {n: prev_totals[n] for n in employees}
         this_month_duties = {n: 0 for n in employees}
@@ -104,65 +105,70 @@ if st.button(f"Generate Final Balanced Roster", type="primary"):
         roster = {n: {d: None for d in range(1, days_in_month + 1)} for n in employees}
 
         for d in range(1, days_in_month + 1):
-            available_pool = []
+            available_workers = []
+            
+            # Step 1: Assign Leaves
             for emp in employees:
                 if emp in st.session_state.leaves and d in st.session_state.leaves[emp]:
                     roster[emp][d] = 'L'
                 else:
-                    available_pool.append(emp)
+                    available_pool.append(emp) if 'available_pool' in locals() else None
+            
+            # Local pool of people not on leave
+            available_pool = [e for e in employees if roster[e][d] != 'L']
 
-            # Fairness Sort: Lowest History + Current Duties first
+            # Step 2: Determine who MUST be off (W/O based on rotation)
+            off_today = []
+            for emp in available_pool[:]:
+                if SEQ[emp_state[emp]] == 'W/O':
+                    roster[emp][d] = 'W/O'
+                    emp_state[emp] = 0 # Cycle restarts
+                    available_pool.remove(emp)
+                    off_today.append(emp)
+
+            # Step 3: Ensure exactly 24 people work (8+8+8)
+            # If we have more than 24 people left, the ones with the HIGHEST duty count get 'X'
+            if len(available_pool) > 24:
+                available_pool.sort(key=lambda x: duty_history[x] + this_month_duties[x], reverse=True)
+                while len(available_pool) > 24:
+                    emp = available_pool.pop(0)
+                    roster[emp][d] = 'X'
+                    off_today.append(emp)
+
+            # Step 4: Distribute the 24 workers into A, B, C shifts
+            # Sort remaining workers by duty debt so those with lowest history get picked first
             available_pool.sort(key=lambda x: duty_history[x] + this_month_duties[x])
             
-            # Select 24 people to work. If someone has worked too much, they are moved to the end of the line.
-            workers_today = available_pool[:24]
-            off_today = available_pool[24:]
-
+            shift_targets = {'C': 8, 'B': 8, 'A': 8}
             shift_counts = {'C': 0, 'B': 0, 'A': 0}
-            unassigned = workers_today[:]
 
-            # Step 1: Assign C (Strictly 8)
-            for emp in unassigned[:]:
-                is_due = (SEQ[emp_state[emp]] == 'C')
-                if shift_counts['C'] < 8 and is_due and c_counts[emp] < 8:
-                    roster[emp][d] = 'C'; shift_counts['C'] += 1; c_counts[emp] += 1
-                    this_month_duties[emp] += 1; emp_state[emp] = (emp_state[emp] + 1) % 7
-                    unassigned.remove(emp)
-
-            # Step 2: Assign B (Strictly 8)
-            for emp in unassigned[:]:
-                is_due = (SEQ[emp_state[emp]] == 'B')
-                if shift_counts['B'] < 8 and is_due:
-                    roster[emp][d] = 'B'; shift_counts['B'] += 1
-                    this_month_duties[emp] += 1; emp_state[emp] = (emp_state[emp] + 1) % 7
-                    unassigned.remove(emp)
-
-            # Step 3: Assign A (Strictly 8)
-            for emp in unassigned[:]:
-                is_due = (SEQ[emp_state[emp]] == 'A')
-                if shift_counts['A'] < 8 and is_due:
-                    roster[emp][d] = 'A'; shift_counts['A'] += 1
-                    this_month_duties[emp] += 1; emp_state[emp] = (emp_state[emp] + 1) % 7
-                    unassigned.remove(emp)
-
-            # Step 4: Fill remaining gaps to reach 8-8-8
+            # First Pass: Match rotation preference
             for s in ['C', 'B', 'A']:
-                while shift_counts[s] < 8 and unassigned:
-                    emp = unassigned.pop(0)
-                    roster[emp][d] = s; shift_counts[s] += 1
+                for emp in available_pool[:]:
+                    if shift_counts[s] < 8 and SEQ[emp_state[emp]] == s:
+                        # Extra check: Don't give C if they hit 8 already, unless they have very few total duties
+                        if s == 'C' and c_counts[emp] >= 8 and (duty_history[emp] + this_month_duties[emp]) > 24:
+                            continue 
+                        
+                        roster[emp][d] = s
+                        shift_counts[s] += 1
+                        this_month_duties[emp] += 1
+                        if s == 'C': c_counts[emp] += 1
+                        emp_state[emp] = (emp_state[emp] + 1) % 7
+                        available_pool.remove(emp)
+
+            # Second Pass: Fill remaining slots regardless of rotation
+            for s in ['C', 'B', 'A']:
+                while shift_counts[s] < 8 and available_pool:
+                    emp = available_pool.pop(0)
+                    roster[emp][d] = s
+                    shift_counts[s] += 1
                     this_month_duties[emp] += 1
                     if s == 'C': c_counts[emp] += 1
                     emp_state[emp] = (SEQ.index(s) + 1) % 7
 
-            # Step 5: Finalize Off statuses (W/O vs X)
-            for emp in off_today:
-                if SEQ[emp_state[emp]] == 'W/O':
-                    roster[emp][d] = 'W/O'; emp_state[emp] = 0
-                else:
-                    roster[emp][d] = 'X' # Extra off to prevent 30-day work weeks
-
         # ==========================================
-        # 4. EXCEL GENERATION & WIDTHS
+        # 4. EXCEL FORMATTING
         # ==========================================
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
@@ -172,24 +178,21 @@ if st.button(f"Generate Final Balanced Roster", type="primary"):
                 if cell.column > 2: cell.value = None
                 cell.fill = PatternFill(fill_type=None); cell.border = Border()
 
-        # STYLES
         thin = Side(border_style="thin"); thick_blue = Side(border_style="thick", color="0000FF")
         all_border = Border(left=thin, right=thin, top=thin, bottom=thin)
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
         center = Alignment(horizontal='center', vertical='center')
-
-        # LOCK COLUMN WIDTHS
+        
         ws.column_dimensions['A'].width = 6.43
         ws.column_dimensions['B'].width = 25
         start_totals = days_in_month + 3
         end_totals = start_totals + 7
-
-        # Titles and Merges
+        
+        # Headers and Merges
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
         t_cell = ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}")
         t_cell.font = Font(bold=True, size=20); t_cell.alignment = center
-
         ws.merge_cells('A2:A3'); ws['A2'] = "S No"; ws['A2'].font = Font(bold=True, size=16); ws['A2'].alignment = center
         ws.merge_cells('B2:B3'); ws['B2'] = "NAME"; ws['B2'].font = Font(bold=True, size=16); ws['B2'].alignment = center
         ws.merge_cells(start_row=2, start_column=3, end_row=2, end_column=days_in_month+2)
@@ -199,15 +202,13 @@ if st.button(f"Generate Final Balanced Roster", type="primary"):
 
         for d in range(1, days_in_month + 1):
             ws.cell(row=3, column=d+2, value=d).alignment = center
-            ws.column_dimensions[get_column_letter(d+2)].width = 5 # Day Width Fixed
-
-        h_labels = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
-        for i, h in enumerate(h_labels):
+            ws.column_dimensions[get_column_letter(d+2)].width = 5
+        for i, h in enumerate(['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']):
             col = start_totals + i
             ws.cell(row=3, column=col, value=h).alignment = center
-            ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5 # Shift Width Fixed
+            ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
 
-        # Write Data
+        # Write Rows
         for idx, emp in enumerate(employees):
             r = idx + 4
             ws.cell(row=r, column=1, value=idx+1)
@@ -225,7 +226,7 @@ if st.button(f"Generate Final Balanced Roster", type="primary"):
             for c in range(1, end_totals + 1):
                 ws.cell(row=r, column=c).border = Border(left=thick_blue if c==1 else thin, right=thick_blue if c==end_totals else thin, top=thin, bottom=thin if idx<len(employees)-1 else thick_blue)
 
-        # Bottom Summary
+        # Summary Bottom
         s_row = len(employees) + 6
         for i, stype in enumerate(["A", "B", "C"]):
             curr_r = s_row + i
@@ -240,4 +241,4 @@ if st.button(f"Generate Final Balanced Roster", type="primary"):
         out = io.BytesIO()
         wb.save(out)
         st.balloons()
-        st.download_button("Download Final Fixed Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
+        st.download_button("Download Fair Balanced Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
