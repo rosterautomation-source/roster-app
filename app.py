@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import io
-import calendar
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from google.oauth2 import service_account
@@ -13,12 +12,11 @@ from googleapiclient.http import MediaIoBaseUpload
 # ==========================================
 st.set_page_config(page_title="Roster Automation", layout="wide")
 
-# YOUR PERMANENT FOLDER ID
 DRIVE_FOLDER_ID = "1pcZWYGXCC1axVDXWtXp1YyQJ79WVeivr" 
 TEMPLATE_FILE = "Template.xlsx"
 
-# Cycle: C1, C2, B1, B2, A1, A2, W/O
 SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 # ==========================================
 # 2. GOOGLE DRIVE CONNECTION
@@ -47,10 +45,8 @@ def upload_to_drive(service, file_stream, filename):
 # 3. ROSTER ENGINE
 # ==========================================
 def get_state(row):
-    # Checks the end of the previous month to see where the employee is in the cycle
     last_val = None
     prev_val = None
-    # Scan backward from column 31 down to 20 to find the last working days
     for d in range(31, 20, -1):
         col = str(d)
         if col in row and pd.notna(row[col]):
@@ -80,17 +76,18 @@ st.info(f"Connected to Google Drive. Last file found: **{latest_file[1]}**")
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("1. Roster Settings")
-target_month_name = st.sidebar.selectbox("Target Month", list(calendar.month_name)[1:], index=3) # Default April
+target_month_name = st.sidebar.selectbox("Target Month", MONTH_NAMES, index=3) # Default April
 target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
-target_month = list(calendar.month_name).index(target_month_name)
-days_in_month = calendar.monthrange(target_year, target_month)[1]
+
+# Use Pandas to calculate days in the month to avoid the Streamlit bug
+target_month_num = MONTH_NAMES.index(target_month_name) + 1
+days_in_month = pd.Period(f'{target_year}-{target_month_num:02d}-01').days_in_month
 
 st.sidebar.markdown("---")
 st.sidebar.header("2. Add Planned Leaves")
 if 'leaves' not in st.session_state: st.session_state.leaves = {}
 
 df_prev = pd.read_excel(latest_file[0], skiprows=2)
-# Clean columns
 df_prev.columns = ['S No', 'NAME'] + [str(i) for i in range(1, len(df_prev.columns)-1)]
 names = df_prev['NAME'].dropna().unique().tolist()
 
@@ -113,7 +110,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         num_employees = len(employees)
         emp_state = {row['NAME']: get_state(row) for _, row in df_clean.iterrows()}
         
-        # Grid based on exact days in the month
         roster = {emp: {d: None for d in range(1, days_in_month + 1)} for emp in employees}
 
         # Apply Leaves
@@ -161,10 +157,8 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
         
-        # 1. Update Title
         ws['A1'] = f"DUTY ROSTER FOR {target_month_name.upper()} {target_year}"
         
-        # 2. Dynamically Write Row 3 Headers
         for d in range(1, days_in_month + 1):
             ws.cell(row=3, column=2+d, value=d)
             
@@ -173,7 +167,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         for idx, header in enumerate(calc_headers):
             ws.cell(row=3, column=calc_col_start + idx, value=header)
 
-        # Get exact column letters
         last_day_col = get_column_letter(2 + days_in_month)
         tot_col = get_column_letter(calc_col_start)
         a_col = get_column_letter(calc_col_start + 1)
@@ -186,7 +179,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
 
         last_employee_row = 3 + num_employees
 
-        # 3. Write Employee Data and Formulas
         for i, emp in enumerate(employees):
             r = 4 + i
             ws.cell(row=r, column=1, value=i+1)
@@ -195,7 +187,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             for d in range(1, days_in_month + 1): 
                 ws.cell(row=r, column=2+d, value=roster[emp][d])
                 
-            # Inject dynamic calculations
             ws[f'{tot_col}{r}'] = f'=SUM({a_col}{r}:{c_col}{r})'
             ws[f'{a_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"A*")'
             ws[f'{b_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"B*")'
@@ -205,7 +196,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws[f'{l_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"L*")'
             ws[f'{g_col}{r}'] = f'=COUNTIF(C{r}:{last_day_col}{r},"G*")'
 
-        # 4. Write Bottom Daily Check Formulas
         bottom_start = last_employee_row + 2
         ws[f'B{bottom_start}'] = "A"
         ws[f'B{bottom_start+1}'] = "B"
@@ -217,7 +207,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
             ws[f'{col_letter}{bottom_start+1}'] = f'=COUNTIF({col_letter}4:{col_letter}{last_employee_row},"B*")'
             ws[f'{col_letter}{bottom_start+2}'] = f'=COUNTIF({col_letter}4:{col_letter}{last_employee_row},"C*")'
 
-        # 5. Save & Upload
         out_stream = io.BytesIO()
         wb.save(out_stream)
         out_stream.seek(0)
