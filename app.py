@@ -19,7 +19,7 @@ SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 # ==========================================
-# 2. GOOGLE DRIVE CONNECTION
+# 2. GOOGLE DRIVE CONNECTION (WITH WORKSPACE BYPASS)
 # ==========================================
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_info(
@@ -30,7 +30,15 @@ def get_drive_service():
 
 def get_latest_roster(service):
     query = f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
-    results = service.files().list(q=query, orderBy="createdTime desc", pageSize=1).execute()
+    # Added includeItemsFromAllDrives and supportsAllDrives to bypass Workspace restrictions
+    results = service.files().list(
+        q=query, 
+        orderBy="createdTime desc", 
+        pageSize=1,
+        includeItemsFromAllDrives=True,
+        supportsAllDrives=True
+    ).execute()
+    
     items = results.get('files', [])
     if not items: return None
     request = service.files().get_media(fileId=items[0]['id'])
@@ -39,7 +47,12 @@ def get_latest_roster(service):
 def upload_to_drive(service, file_stream, filename):
     file_metadata = {'name': filename, 'parents': [DRIVE_FOLDER_ID]}
     media = MediaIoBaseUpload(file_stream, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    service.files().create(body=file_metadata, media_body=media).execute()
+    # Added supportsAllDrives=True to bypass Workspace upload restrictions
+    service.files().create(
+        body=file_metadata, 
+        media_body=media,
+        supportsAllDrives=True
+    ).execute()
 
 # ==========================================
 # 3. ROSTER ENGINE
@@ -156,7 +169,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
         
-        # Format the 3-letter month abbreviation for the title inside the Excel sheet
         month_abbr = target_month_name[:3].upper()
         ws['A1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
         
@@ -212,8 +224,6 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         wb.save(out_stream)
         out_stream.seek(0)
         
-        # --- NEW FILE NAMING LOGIC HERE ---
-        # Output will be: "ROSTER OF APR 2026 - Calculation.xlsx"
         new_name = f"ROSTER OF {month_abbr} {target_year} - Calculation.xlsx"
         upload_to_drive(service, out_stream, new_name)
         
