@@ -98,7 +98,7 @@ if st.sidebar.button("Register Leave"):
     st.sidebar.success(f"Added for {sel_name}")
 
 # ==========================================
-# 4. PRODUCTION LEVEL ENGINE (THE FIX)
+# 4. PRODUCTION LEVEL ENGINE (STRICT C LOCK FIX)
 # ==========================================
 if st.button("Generate Fair & Balanced Roster", type="primary"):
     with st.spinner("Aligning Rotation & Fair Shifts..."):
@@ -114,6 +114,15 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
         consecutive_days = {n: 0 for n in employees}
         roster = {n: {d: "" for d in range(1, days_in_month + 1)} for n in employees}
 
+        # 🔥 STRICT C LIMIT FUNCTION
+        def get_c_limit(emp):
+            if this_month_duties[emp] >= 25:
+                return 9
+            elif this_month_duties[emp] >= 24:
+                return 8
+            else:
+                return 8
+
         for d in range(1, days_in_month + 1):
 
             available = []
@@ -124,75 +133,71 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                 else:
                     available.append(emp)
 
-            # 🎯 Select 24 Workers: Prioritize those whose rotation is NOT W/O and who have lower duties
             def worker_selection_score(emp):
                 score = 0
                 if SEQ[emp_state[emp]] != 'W/O':
-                    score += 1000 # Fiercely protect scheduled work days
+                    score += 1000
                 score += (TARGET_TOTAL - this_month_duties[emp]) * 10
                 if consecutive_days[emp] >= 5:
-                    score -= 500 # Force rest if working too long
+                    score -= 500
                 return score
 
             available.sort(key=worker_selection_score, reverse=True)
             workers_today = available[:24]
             off_today = available[24:]
 
-            # Assign Off Days
             for emp in off_today:
                 if SEQ[emp_state[emp]] == 'W/O':
                     roster[emp][d] = 'W/O'
-                    emp_state[emp] = 0 # Advance to C
+                    emp_state[emp] = 0
                 else:
-                    roster[emp][d] = 'X' # Extra Off (Rotation pauses, does not advance)
+                    roster[emp][d] = 'X'
                 consecutive_days[emp] = 0
 
             assigned_today = set()
 
-            # 🎯 Perfected Shift Scoring
             def shift_score(emp, shift):
                 score = 0
-                
-                # 1. ROTATION IS KING
+
+                # Rotation priority
                 if SEQ[emp_state[emp]] == shift:
                     score += 5000
 
-                # 2. PROPORTIONAL SHIFT BALANCING (Fixes the 24=9C bug)
-                # Calculates expected shifts based on how much they have worked *so far*
                 expected_ratio = max(1, this_month_duties[emp]) / 3.0
 
                 if shift == 'C':
-                    score += (expected_ratio - c_counts[emp]) * 200
-                    if c_counts[emp] >= 8: score -= 1000 # Strong penalty avoiding 9th C shift
+                    score += (get_c_limit(emp) - c_counts[emp]) * 200
                 elif shift == 'B':
                     score += (expected_ratio - this_month_B[emp]) * 200
                 elif shift == 'A':
                     score += (expected_ratio - this_month_A[emp]) * 200
 
-                # 3. Duty Debt & Burnout
                 score += (TARGET_TOTAL - this_month_duties[emp]) * 10
-                if consecutive_days[emp] >= 5: score -= 1000
+
+                if consecutive_days[emp] >= 5:
+                    score -= 1000
 
                 score += random.uniform(0, 1)
                 return score
 
-            # 🔁 Assign A, B, C exactly 8 times
             for shift in ['C', 'B', 'A']:
                 for _ in range(8):
+
                     candidates = [e for e in workers_today if e not in assigned_today]
 
-                    # Strict Hard Constraints (Do not break unless absolutely forced)
                     valid = []
                     for emp in candidates:
-                        if shift == 'C' and c_counts[emp] >= 8: continue
-                        if consecutive_days[emp] >= 6: continue
+                        # 🔥 STRICT C LOCK APPLIED HERE
+                        if shift == 'C' and c_counts[emp] >= get_c_limit(emp):
+                            continue
+                        if consecutive_days[emp] >= 6:
+                            continue
                         valid.append(emp)
 
-                    # Fallback 1: Relax consecutive days slightly to cover gaps
+                    # fallback (still respects C lock)
                     if not valid:
-                        valid = [e for e in candidates if shift != 'C' or c_counts[e] < 8]
+                        valid = [e for e in candidates if shift != 'C' or c_counts[e] < get_c_limit(e)]
 
-                    # Fallback 2: Absolute Emergency (Allows 9th C shift only if 8-8-8 is failing)
                     if not valid:
                         valid = candidates
 
@@ -205,11 +210,13 @@ if st.button("Generate Fair & Balanced Roster", type="primary"):
                     this_month_duties[chosen] += 1
                     consecutive_days[chosen] += 1
 
-                    if shift == 'C': c_counts[chosen] += 1
-                    elif shift == 'A': this_month_A[chosen] += 1
-                    elif shift == 'B': this_month_B[chosen] += 1
+                    if shift == 'C':
+                        c_counts[chosen] += 1
+                    elif shift == 'A':
+                        this_month_A[chosen] += 1
+                    elif shift == 'B':
+                        this_month_B[chosen] += 1
 
-                    # Advance rotation state strictly based on the shift they actually performed
                     if SEQ[emp_state[chosen]] == shift:
                         emp_state[chosen] = (emp_state[chosen] + 1) % 7
                     else:
