@@ -84,7 +84,7 @@ if st.sidebar.button("Register Leave"):
 # 3. GENERATION
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Refining Layout..."):
+    with st.spinner("Fixing Borders and Merges..."):
         employees = df_prev.dropna(subset=['NAME'])['NAME'].tolist()
         emp_state = {name: get_state(row) for name, row in zip(employees, df_prev.dropna(subset=['NAME']).to_dict('records'))}
         
@@ -101,84 +101,92 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
         
-        # 1. CLEAN SLATE: Wipe old borders and data completely
+        # 1. CLEAN SLATE: Remove all old merges and borders to avoid AO Column Ghost
         for m in list(ws.merged_cells.ranges): ws.unmerge_cells(str(m))
-        for r in ws.iter_rows(min_row=1, max_row=100, min_col=3, max_col=60):
+        for r in ws.iter_rows(min_row=1, max_row=100, min_col=1, max_col=60):
             for cell in r:
-                cell.value = None
-                cell.fill = PatternFill(fill_type=None)
+                if cell.column > 2: # Keep S No and Name headers
+                    cell.value = None
+                    cell.fill = PatternFill(fill_type=None)
                 cell.border = Border()
 
-        # 2. DEFINE STYLES
+        # 2. STYLES
         thin = Side(border_style="thin", color="000000")
         thick_blue = Side(border_style="thick", color="0000FF")
-        all_border = Border(left=thin, right=thin, top=thin, bottom=thin)
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
         center = Alignment(horizontal='center', vertical='center')
 
-        # 3. TITLES
-        ws['B1'] = f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}"
-        ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=days_in_month + 10)
-        ws['B1'].alignment = center
+        # 3. DYNAMIC MERGES
+        start_totals = days_in_month + 3
+        end_totals = start_totals + 7
+        
+        # Title
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
+        ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}").alignment = center
 
         # Attendance Header
-        ws.cell(row=2, column=3, value="ATTENDANCE")
         ws.merge_cells(start_row=2, start_column=3, end_row=2, end_column=days_in_month+2)
-        ws.cell(row=2, column=3).alignment = center
+        ws.cell(row=2, column=3, value="ATTENDANCE").alignment = center
 
-        # 4. WRITE DAYS
+        # Total Shifts Header
+        ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=end_totals)
+        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").alignment = center
+
+        # 4. WRITE HEADERS
         for d in range(1, days_in_month + 1):
-            col = d + 2
-            ws.cell(row=3, column=col, value=d)
-            ws.column_dimensions[get_column_letter(col)].width = 5
-            ws.cell(row=3, column=col).border = all_border
-
-        # 5. TOTAL SHIFTS SECTION (Fixing AO Column and Double G)
-        start_totals = days_in_month + 3
-        ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS")
-        ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=start_totals+7)
-        ws.cell(row=2, column=start_totals).alignment = center
-        
+            ws.cell(row=3, column=d+2, value=d).alignment = center
+            ws.column_dimensions[get_column_letter(d+2)].width = 5
+            
         headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
         for i, h in enumerate(headers):
             col = start_totals + i
-            ws.cell(row=3, column=col, value=h)
-            ws.cell(row=3, column=col).border = all_border
+            ws.cell(row=3, column=col, value=h).alignment = center
             ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
 
-        # 6. EMPLOYEE DATA & BORDERS
+        # 5. WRITE DATA & BORDERS
         for idx, emp in enumerate(employees):
             r = idx + 4
-            ws.cell(row=r, column=1, value=idx+1).border = all_border
-            ws.cell(row=r, column=2, value=emp).border = all_border
+            ws.cell(row=r, column=1, value=idx+1)
+            ws.cell(row=r, column=2, value=emp)
             
             for d in range(1, days_in_month + 1):
-                cell = ws.cell(row=r, column=d+2, value=roster[emp][d])
-                cell.border = all_border
+                ws.cell(row=r, column=d+2, value=roster[emp][d]).alignment = center
             
-            # Formula letters
+            # Column Mapping
+            tot_ltr = get_column_letter(start_totals)
             last_d_ltr = get_column_letter(days_in_month + 2)
-            tot_ltr, a_ltr, b_ltr, c_ltr, wo_ltr, x_ltr, l_ltr, g_ltr = [get_column_letter(start_totals + i) for i in range(8)]
+            shift_letters = [get_column_letter(start_totals + i) for i in range(1, 8)]
 
-            # Formulate
-            ws[f'{tot_ltr}{r}'] = f'=SUM({a_ltr}{r}:{c_ltr}{r})'
-            ws[f'{a_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"A*")'
-            ws[f'{b_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"B*")'
-            ws[f'{c_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"C*")'
-            ws[f'{wo_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"W/O*")'
-            ws[f'{x_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"X*")'
-            ws[f'{l_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"L*")'
-            ws[f'{g_ltr}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"G*")'
+            # Formulas
+            ws[f'{tot_ltr}{r}'] = f'=SUM({get_column_letter(start_totals+1)}{r}:{get_column_letter(start_totals+3)}{r})'
+            ws[f'{get_column_letter(start_totals+1)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"A*")'
+            ws[f'{get_column_letter(start_totals+2)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"B*")'
+            ws[f'{get_column_letter(start_totals+3)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"C*")'
+            ws[f'{get_column_letter(start_totals+4)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"W/O*")'
+            ws[f'{get_column_letter(start_totals+5)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"X*")'
+            ws[f'{get_column_letter(start_totals+6)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr(r)},"L*")' # Fixed typo here
+            ws[f'{get_column_letter(start_totals+6)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"L*")'
+            ws[f'{get_column_letter(start_totals+7)}{r}'] = f'=COUNTIF(C{r}:{last_d_ltr}{r},"G*")'
 
-            # Apply Paint and Borders to Calc columns
+            # Paint
             ws[f'{tot_ltr}{r}'].fill = yellow_fill
-            for ltr in [tot_ltr, a_ltr, b_ltr, c_ltr, wo_ltr, x_ltr, l_ltr, g_ltr]:
-                ws[f'{ltr}{r}'].border = all_border
-                if ltr != tot_ltr: ws[f'{ltr}{r}'].fill = peach_fill
+            for ltr in shift_letters: ws[f'{ltr}{r}'].fill = peach_fill
 
-            # --- THE FIX: THICK BLUE BORDER AT THE FINAL COLUMN ONLY ---
-            ws.cell(row=r, column=start_totals+7).border = Border(left=thin, right=thick_blue, top=thin, bottom=thin)
+            # Apply Borders to the entire row (1 to end_totals)
+            for c in range(1, end_totals + 1):
+                cell = ws.cell(row=r, column=c)
+                right_side = thick_blue if c == end_totals else thin
+                left_side = thick_blue if c == 1 else thin
+                cell.border = Border(left=left_side, right=right_side, top=thin, bottom=thin)
+
+        # Apply borders to headers (Row 1-3)
+        for r_h in range(1, 4):
+            for c_h in range(1, end_totals + 1):
+                cell = ws.cell(row=r_h, column=c_h)
+                right_side = thick_blue if c_h == end_totals else thin
+                left_side = thick_blue if c_h == 1 else thin
+                cell.border = Border(left=left_side, right=right_side, top=thin, bottom=thin)
 
         out = io.BytesIO()
         wb.save(out)
