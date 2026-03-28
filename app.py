@@ -72,7 +72,7 @@ if 'leaves' not in st.session_state: st.session_state.leaves = {}
 df_prev = pd.read_excel(latest_file[0], skiprows=2)
 df_prev.columns = ['S No', 'NAME'] + [str(i) for i in range(1, len(df_prev.columns)-1)]
 
-# FIX: Filter out A, B, C from employee logic
+# Filter out Summary rows from logic
 names_list = [n for n in df_prev['NAME'].dropna().unique().tolist() if str(n).strip() not in ["A", "B", "C"]]
 
 sel_name = st.sidebar.selectbox("Select Employee", names_list)
@@ -86,7 +86,7 @@ if st.sidebar.button("Register Leave"):
 # 3. GENERATION
 # ==========================================
 if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
-    with st.spinner("Aligning with Expected Snip..."):
+    with st.spinner("Locking Column Widths and Layout..."):
         employees = names_list
         emp_state = {name: get_state(row) for name, row in zip(employees, df_prev[df_prev['NAME'].isin(employees)].to_dict('records'))}
         
@@ -118,18 +118,23 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         peach_fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
         center = Alignment(horizontal='center', vertical='center')
-        header_font = Font(bold=True, size=16)
+        
         title_font = Font(bold=True, size=20)
+        header_font = Font(bold=True, size=16)
 
-        # 3. LAYOUT
+        # 3. DYNAMIC LAYOUT & WIDTHS
         start_totals = days_in_month + 3
         end_totals = start_totals + 7
-        ws.column_dimensions['A'].width = 6.43
+        
+        ws.column_dimensions['A'].width = 6.43 # Fixed
+        ws.column_dimensions['B'].width = 25   # Name column width
 
+        # Row 1 Title
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_totals)
         title_cell = ws.cell(row=1, column=1, value=f"DUTY ROSTER FOR THE MONTH OF {target_month_name[:3].upper()} {target_year}")
         title_cell.alignment = center; title_cell.font = title_font
 
+        # Row 2 & 3 Headers
         ws.merge_cells('A2:A3'); ws['A2'] = "S No"; ws['A2'].alignment = center; ws['A2'].font = header_font
         ws.merge_cells('B2:B3'); ws['B2'] = "NAME"; ws['B2'].alignment = center; ws['B2'].font = header_font
         
@@ -139,20 +144,20 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         ws.merge_cells(start_row=2, start_column=start_totals, end_row=2, end_column=end_totals)
         ws.cell(row=2, column=start_totals, value="TOTAL SHIFTS").alignment = center; ws.cell(row=2, column=start_totals).font = header_font
 
-        # Day Headers (Width 5)
+        # Write Day numbers (Width 5)
         for d in range(1, days_in_month + 1):
             col = d + 2
             ws.cell(row=3, column=col, value=d).alignment = center
             ws.column_dimensions[get_column_letter(col)].width = 5
-            ws.cell(row=3, column=col).border = Border(left=thin, right=thin, top=thin, bottom=thin)
             
+        # Write Shift Headers (Width 10 and 5)
         headers = ['TOTAL', 'A', 'B', 'C', 'W/O', 'X', 'L', 'G']
         for i, h in enumerate(headers):
             col = start_totals + i
             ws.cell(row=3, column=col, value=h).alignment = center
             ws.column_dimensions[get_column_letter(col)].width = 10 if h == 'TOTAL' else 5
 
-        # 4. EMPLOYEE DATA
+        # 4. WRITE EMPLOYEE DATA
         num_emp = len(employees)
         for idx, emp in enumerate(employees):
             r = idx + 4
@@ -175,29 +180,31 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
             for c_paint in range(start_totals + 1, end_totals + 1):
                 ws.cell(row=r, column=c_paint).fill = peach_fill
 
-            # Apply Main Table Borders (Blue Outlines)
+            # Standard Row Borders with Thick Blue Outline
             for c in range(1, end_totals + 1):
                 cell = ws.cell(row=r, column=c)
-                cell.border = Border(left=thick_blue if c==1 else thin, right=thick_blue if c==end_totals else thin, top=thin, bottom=thin)
+                l_s = thick_blue if c==1 else thin
+                r_s = thick_blue if c==end_totals else thin
+                b_s = thick_blue if idx == num_emp - 1 else thin
+                cell.border = Border(left=l_s, right=r_s, top=thin, bottom=b_s)
 
-        # Apply Header Borders (Rows 1-3)
+        # Header Borders (Rows 1-3)
         for r_h in range(1, 4):
             for c_h in range(1, end_totals + 1):
-                ws.cell(row=r_h, column=c_h).border = Border(left=thick_blue if c_h==1 else thin, right=thick_blue if c_h==end_totals else thin, top=thick_blue if r_h==1 else thin, bottom=thin)
+                ws.cell(row=r_h, column=c_h).border = Border(
+                    left=thick_blue if c_h==1 else thin, 
+                    right=thick_blue if c_h==end_totals else thin, 
+                    top=thick_blue if r_h==1 else thin, 
+                    bottom=thin
+                )
 
-        # Apply Bottom Thick Blue Border to last employee row
-        for c in range(1, end_totals + 1):
-            ws.cell(row=num_emp+3, column=c).border = Border(left=thick_blue if c==1 else thin, right=thick_blue if c==end_totals else thin, top=thin, bottom=thick_blue)
-
-        # 5. EXPECTED YELLOW SUMMARY BOX (A, B, C counts)
+        # 5. YELLOW SUMMARY BOX (A, B, C counts)
         summary_row = num_emp + 6
         for i, s_type in enumerate(["A", "B", "C"]):
             r_sum = summary_row + i
-            # Label Cell (Yellow, Bold, Center)
             l_cell = ws.cell(row=r_sum, column=2, value=s_type)
             l_cell.fill = yellow_fill; l_cell.font = Font(bold=True); l_cell.alignment = center; l_cell.border = all_border
             
-            # Daily Count Cells (Yellow, Center)
             for d in range(1, days_in_month + 1):
                 col = d + 2
                 col_ltr = get_column_letter(col)
@@ -207,4 +214,4 @@ if st.button(f"Generate Roster ({days_in_month} Days)", type="primary"):
         out = io.BytesIO()
         wb.save(out)
         st.balloons()
-        st.download_button("Download Expected Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
+        st.download_button("Download Final Roster", out.getvalue(), f"ROSTER_{target_month_name}.xlsx")
