@@ -79,7 +79,6 @@ st.sidebar.header("1. Roster Settings")
 target_month_name = st.sidebar.selectbox("Target Month", MONTH_NAMES, index=3) # Default April
 target_year = st.sidebar.number_input("Target Year", min_value=2024, max_value=2050, value=2026)
 
-# Use Pandas to calculate days in the month to avoid the Streamlit bug
 target_month_num = MONTH_NAMES.index(target_month_name) + 1
 days_in_month = pd.Period(f'{target_year}-{target_month_num:02d}-01').days_in_month
 
@@ -157,7 +156,9 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         wb = load_workbook(TEMPLATE_FILE)
         ws = wb.active
         
-        ws['A1'] = f"DUTY ROSTER FOR {target_month_name.upper()} {target_year}"
+        # Format the 3-letter month abbreviation for the title inside the Excel sheet
+        month_abbr = target_month_name[:3].upper()
+        ws['A1'] = f"DUTY ROSTER FOR THE MONTH OF {month_abbr} {target_year}"
         
         for d in range(1, days_in_month + 1):
             ws.cell(row=3, column=2+d, value=d)
@@ -211,9 +212,11 @@ if st.button(f"Generate Roster for {target_month_name} {target_year} ({days_in_m
         wb.save(out_stream)
         out_stream.seek(0)
         
-        new_name = f"ROSTER_{target_month_name.upper()}_{target_year}.xlsx"
+        # --- NEW FILE NAMING LOGIC HERE ---
+        # Output will be: "ROSTER OF APR 2026 - Calculation.xlsx"
+        new_name = f"ROSTER OF {month_abbr} {target_year} - Calculation.xlsx"
         upload_to_drive(service, out_stream, new_name)
         
         st.balloons()
-        st.success(f"🔥 Successfully saved to Drive as: {new_name}")
+        st.success(f"🔥 Successfully saved to Drive as: **{new_name}**")
         st.download_button("Download Now", data=out_stream, file_name=new_name)
