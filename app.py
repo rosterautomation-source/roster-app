@@ -7,25 +7,19 @@ from openpyxl import load_workbook
 st.set_page_config(page_title="Roster App", layout="wide")
 st.title("Roster Generator")
 
-# =========================
-# SELECT MONTH
-# =========================
+# MONTH SELECTION
 month = st.selectbox("Select Month", list(calendar.month_name)[1:])
 year = st.number_input("Select Year", 2024, 2050, 2026)
 month_num = list(calendar.month_name).index(month)
 days = calendar.monthrange(year, month_num)[1]
 st.write("Selected:", month, year, "| Days:", days)
 
-# =========================
 # LOAD FILE
-# =========================
 with st.spinner("Loading previous month roster..."):
     df = pd.read_excel("latest_roster.xlsx", skiprows=2)
 st.success("File loaded successfully")
 
-# =========================
 # FIND TOTAL COLUMN
-# =========================
 total_col_index = None
 for i in range(len(df.columns)):
     if "TOTAL" in str(df.columns[i]).upper():
@@ -48,9 +42,7 @@ for i in range(len(df)):
         else:
             prev_duties[name] = 0
 
-# =========================
 # LAST SHIFT
-# =========================
 def get_last_shift(row):
     for col in reversed(df.columns):
         val = row[col]
@@ -64,16 +56,11 @@ last_shift = {}
 for emp in employees:
     last_shift[emp] = get_last_shift(emp_rows[emp])
 
-# =========================
-# DUTIES TRACK
-# =========================
+# DUTY TRACKING
 current_duties = {emp: 0 for emp in employees}
 
-# =========================
 # GENERATE ROSTER
-# =========================
 roster = {emp: {} for emp in employees}
-
 for d in range(1, days + 1):
     sorted_employees = sorted(
         employees,
@@ -110,14 +97,16 @@ for d in range(1, days + 1):
             current_duties[emp] += 1
             last_shift[emp] = day_roster[emp]
 
-# =========================
 # WRITE TO TEMPLATE
-# =========================
 wb = load_workbook("Template.xlsx")
 ws = wb.active
 
-# UPDATE HEADER (MONTH NAME)
-ws["C1"] = f"DUTY ROSTER FOR THE MONTH OF {month.upper()} {year}"
+# FIX HEADER (MERGED CELL SAFE)
+for merged_cell in ws.merged_cells.ranges:
+    if "1" in str(merged_cell):
+        top_left = str(merged_cell).split(":")[0]
+        ws[top_left] = f"DUTY ROSTER FOR THE MONTH OF {month.upper()} {year}"
+        break
 
 # WRITE DATA
 for i, emp in enumerate(employees):
@@ -125,6 +114,12 @@ for i, emp in enumerate(employees):
     ws.cell(row=row, column=2, value=emp)
     for d in range(1, days + 1):
         ws.cell(row=row, column=d + 2, value=roster[emp][d])
+
+# CLEAR EXTRA DAYS
+for i, emp in enumerate(employees):
+    row = i + 4
+    for d in range(days + 1, 32):
+        ws.cell(row=row, column=d + 2, value="")
 
 output = io.BytesIO()
 wb.save(output)
