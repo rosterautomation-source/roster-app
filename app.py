@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import io
+from openpyxl import load_workbook
 
 st.set_page_config(page_title="Roster App", layout="wide")
 st.title("Roster Generator")
@@ -31,11 +33,7 @@ for i in range(len(df)):
         else:
             prev_duties[name] = 0
 
-st.write("Total Employees:", len(employees))
-
-# =========================
 # LAST SHIFT
-# =========================
 def get_last_shift(row):
     for col in reversed(df.columns):
         val = row[col]
@@ -49,23 +47,14 @@ last_shift = {}
 for emp in employees:
     last_shift[emp] = get_last_shift(emp_rows[emp])
 
-# =========================
-# CURRENT MONTH DUTIES
-# =========================
-current_duties = {}
-for emp in employees:
-    current_duties[emp] = 0
+# DUTIES TRACK
+current_duties = {emp: 0 for emp in employees}
 
-# =========================
-# GENERATE MONTH
-# =========================
+# GENERATE ROSTER
 days = 30
-roster = {}
-for emp in employees:
-    roster[emp] = {}
+roster = {emp: {} for emp in employees}
 
 for d in range(1, days + 1):
-    # SORT BY FAIRNESS
     sorted_employees = sorted(
         employees,
         key=lambda x: (current_duties[x] + prev_duties[x])
@@ -75,31 +64,25 @@ for d in range(1, days + 1):
     off_people = sorted_employees[24:]
 
     day_roster = {}
-
-    # ASSIGN SHIFTS DYNAMICALLY
-    c_count = 0
-    b_count = 0
-    a_count = 0
+    c = b = a = 0
 
     for emp in workers:
-        if c_count < 8:
+        if c < 8:
             day_roster[emp] = "C"
-            c_count += 1
-        elif b_count < 8:
+            c += 1
+        elif b < 8:
             day_roster[emp] = "B"
-            b_count += 1
+            b += 1
         else:
-            # RULE: C → A NOT ALLOWED
             if last_shift[emp] == "C":
                 day_roster[emp] = "B"
             else:
                 day_roster[emp] = "A"
-            a_count += 1
+            a += 1
 
     for emp in off_people:
         day_roster[emp] = "W/O"
 
-    # UPDATE
     for emp in employees:
         roster[emp][d] = day_roster[emp]
 
@@ -107,7 +90,23 @@ for d in range(1, days + 1):
             current_duties[emp] += 1
             last_shift[emp] = day_roster[emp]
 
-# SHOW RESULT
-st.write("Final Roster Sample (First 5 Employees):")
-for emp in employees[:5]:
-    st.write(emp, roster[emp])
+# WRITE TO TEMPLATE
+wb = load_workbook("Template.xlsx")
+ws = wb.active
+
+for i, emp in enumerate(employees):
+    row = i + 4
+    ws.cell(row=row, column=2, value=emp)
+    for d in range(1, days + 1):
+        ws.cell(row=row, column=d + 2, value=roster[emp][d])
+
+output = io.BytesIO()
+wb.save(output)
+output.seek(0)
+
+st.success("Roster Generated Successfully")
+st.download_button(
+    "Download Roster",
+    output,
+    file_name="NEW_ROSTER.xlsx"
+)
