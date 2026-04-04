@@ -101,12 +101,20 @@ for d in range(1, days + 1):
 wb = load_workbook("Template.xlsx")
 ws = wb.active
 
-# FIX HEADER (MERGED CELL SAFE)
+# FIX HEADER (MERGED SAFE)
 for merged_cell in ws.merged_cells.ranges:
     if "1" in str(merged_cell):
         top_left = str(merged_cell).split(":")[0]
         ws[top_left] = f"DUTY ROSTER FOR THE MONTH OF {month.upper()} {year}"
         break
+
+# FIX DATE HEADER ROW (ROW 3)
+for d in range(1, 32):
+    col = d + 2
+    if d <= days:
+        ws.cell(row=3, column=col, value=d)
+    else:
+        ws.cell(row=3, column=col, value="")
 
 # WRITE DATA
 for i, emp in enumerate(employees):
@@ -115,7 +123,7 @@ for i, emp in enumerate(employees):
     for d in range(1, days + 1):
         ws.cell(row=row, column=d + 2, value=roster[emp][d])
 
-# CLEAR EXTRA DAYS
+# CLEAR EXTRA DATA
 for i, emp in enumerate(employees):
     row = i + 4
     for d in range(days + 1, 32):
