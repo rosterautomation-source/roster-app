@@ -33,22 +33,56 @@ for i in range(len(df)):
 
 st.write("Total Employees:", len(employees))
 
-# SORT BASED ON FAIRNESS (LOW DUTIES FIRST)
-sorted_employees = sorted(employees, key=lambda x: prev_duties[x])
+# =========================
+# STATE DETECTION
+# =========================
+def get_last_shift(row):
+    for col in reversed(df.columns):
+        val = row[col]
+        if pd.notna(val):
+            v = str(val).strip().upper()
+            if v in ['A', 'B', 'C']:
+                return v
+    return None
 
-# PICK WORKERS
+last_shift = {}
+for emp in employees:
+    last_shift[emp] = get_last_shift(emp_rows[emp])
+
+# =========================
+# DAY 1 LOGIC WITH RULES
+# =========================
+sorted_employees = sorted(employees, key=lambda x: prev_duties[x])
 workers = sorted_employees[:24]
 off_people = sorted_employees[24:]
-
-# ASSIGN SHIFTS
 day1_roster = {}
-for i in range(len(workers)):
-    if i < 8:
-        day1_roster[workers[i]] = "C"
-    elif i < 16:
-        day1_roster[workers[i]] = "B"
-    else:
-        day1_roster[workers[i]] = "A"
+
+# FIRST PASS: ASSIGN C (8)
+count = 0
+for emp in workers:
+    if count < 8:
+        day1_roster[emp] = "C"
+        count += 1
+
+# SECOND PASS: ASSIGN B (8)
+count = 0
+for emp in workers:
+    if emp not in day1_roster:
+        if count < 8:
+            day1_roster[emp] = "B"
+            count += 1
+
+# THIRD PASS: ASSIGN A (8) WITH RULE
+count = 0
+for emp in workers:
+    if emp not in day1_roster:
+        if count < 8:
+            # 🚨 RULE: C → A NOT ALLOWED
+            if last_shift[emp] == "C":
+                day1_roster[emp] = "B"
+            else:
+                day1_roster[emp] = "A"
+            count += 1
 
 # OFF PEOPLE
 for emp in off_people:
@@ -57,3 +91,7 @@ for emp in off_people:
 st.write("Day 1 Roster Sample:")
 sample = dict(list(day1_roster.items())[:10])
 st.write(sample)
+
+st.write("Last Shift Sample:")
+sample_last = dict(list(last_shift.items())[:5])
+st.write(sample_last)
