@@ -33,43 +33,27 @@ for i in range(len(df)):
 
 st.write("Total Employees:", len(employees))
 
-# =========================
-# FIXED STATE DETECTION
-# =========================
-SEQ = ['C', 'C', 'B', 'B', 'A', 'A', 'W/O']
+# SORT BASED ON FAIRNESS (LOW DUTIES FIRST)
+sorted_employees = sorted(employees, key=lambda x: prev_duties[x])
 
-def get_state(row):
-    last_val = None
-    prev_val = None
+# PICK WORKERS
+workers = sorted_employees[:24]
+off_people = sorted_employees[24:]
 
-    for col in reversed(df.columns):
-        val = row[col]
+# ASSIGN SHIFTS
+day1_roster = {}
+for i in range(len(workers)):
+    if i < 8:
+        day1_roster[workers[i]] = "C"
+    elif i < 16:
+        day1_roster[workers[i]] = "B"
+    else:
+        day1_roster[workers[i]] = "A"
 
-        if pd.notna(val):
-            v = str(val).strip().upper()
+# OFF PEOPLE
+for emp in off_people:
+    day1_roster[emp] = "W/O"
 
-            if v in ['A', 'B', 'C', 'W/O', 'X', 'L']:
-                if last_val is None:
-                    last_val = v
-                elif prev_val is None:
-                    prev_val = v
-                    break
-
-    if last_val == 'C':
-        return 2 if prev_val == 'C' else 1
-
-    if last_val == 'B':
-        return 4 if prev_val == 'B' else 3
-
-    if last_val == 'A':
-        return 6 if prev_val == 'A' else 5
-
-    return 0
-
-emp_state = {}
-for emp in employees:
-    emp_state[emp] = get_state(emp_rows[emp])
-
-st.write("Sample Rotation States:")
-sample_state = dict(list(emp_state.items())[:5])
-st.write(sample_state)
+st.write("Day 1 Roster Sample:")
+sample = dict(list(day1_roster.items())[:10])
+st.write(sample)
